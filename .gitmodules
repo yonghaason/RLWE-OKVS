@@ -1,0 +1,6 @@
+[submodule "thirdparty/SEAL"]
+	path = thirdparty/SEAL
+	url = https://github.com/microsoft/SEAL.git
+[submodule "thirdparty/libOTe"]
+	path = thirdparty/libOTe
+	url = https://github.com/osu-crypto/libOTe

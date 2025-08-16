@@ -39,3 +39,8 @@
 
 # debug information files
 *.dwo
+
+build/*
+.vscode/*
+__pycache__/*
+thirdparty/install/*
