@@ -65,7 +65,6 @@ void encode_test(const oc::CLP& cmd)
     } 
 }
 
-
 void decode_test(const oc::CLP& cmd)
 {
     u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
