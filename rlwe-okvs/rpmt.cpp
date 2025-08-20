@@ -10,7 +10,6 @@ namespace rlweOkvs
 {
     void RpmtSender::init(uint32_t n, uint32_t logp, uint64_t numSlots)
     {
-        // TESTTEST
         EncryptionParameters parms(scheme_type::bgv);
         mNumSlots = numSlots;
         parms.set_poly_modulus_degree(mNumSlots);
