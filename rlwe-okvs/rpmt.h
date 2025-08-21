@@ -36,7 +36,7 @@ namespace rlweOkvs
             const std::vector<oc::block> &Y,
             std::vector<seal::Plaintext> &ptxts);
 
-        // After receinving ctxts
+        // After receiving ctxts
         void encrypted_decode(
             const std::vector<seal::Ciphertext> &encoded_in_he,
             const std::vector<seal::Plaintext> &ptxts,

@@ -16,7 +16,7 @@ namespace rlweOkvs
 
         mN = n;
         mM = ((ceil(1.16 * n) / mNumSlots) + 1) * mNumSlots;
-        mW = 140; // FIXME
+        mW = 134; // 1.16 ; security paraemter = 40
         mNumBatch = mM / mNumSlots;
         
         // TODO: Seek the optimal parameter (particularly coeff modulus)
@@ -42,19 +42,48 @@ namespace rlweOkvs
         co_await chl.send(decoded_in_he);
     }
 
+    /* 구현해야 할 부분 (8.21) */
     void RpmtSender::preprocess(
         const std::vector<oc::block> &Y,
         std::vector<seal::Plaintext> &ptxts)
     {
+        //Make matrix Y
+        assert (Y.size() == mN);
+
+        PrimeFieldOkvs okvs;
+        okvs.setTimer(getTimer());
+        okvs.init(Y.size(), mM, mW, mModulus);
+        vector<uint64_t> bands_flat(mN*mW); // this is matrix Y
+        vector<uint32_t> start_pos(mN);
+        okvs.generate_band(key, bands_flat, start_pos, seed);
+
+        //Sequencing
+        vector<uint32_t> start_freq(mNumBatch, 0);
+        uint64_t L = 0; // number of t_s set
+
+        uint32_t* f = start_freq.data();
+
+        for(size_t i = 0 ; i < mN, ++i){
+            uint64_t r = start_pos[i] & mask; // % t 대신 bitmask
+            start_pos[i] = r;
+            uint32_t c = ++f[static_cast<size_t>(r)];
+            if(c > L) L = c;
+        }
+        //여기까지 하면 t_s set 개수는 미리 설정 완료. 
         
+
+
+
+        //Batch
     }
 
+    /* 구현해야 할 부분 (8.21) */
     void RpmtSender::encrypted_decode(
         const std::vector<seal::Ciphertext> &encoded_in_he,
         const std::vector<seal::Plaintext> &ptxts,
         std::vector<seal::Ciphertext> &decoded_in_he)
     {
-
+        //PlainMult, CtxtAdd가 이루어질 부분
     }
 
     void RpmtReceiver::init(uint32_t n, uint32_t logp, uint64_t numSlots)
@@ -65,7 +94,7 @@ namespace rlweOkvs
 
         mN = n;
         mM = ((ceil(1.16 * n) / mNumSlots) + 1) * mNumSlots;
-        mW = 140; // FIXME
+        mW = 134; // FIXME
         mNumBatch = mM / mNumSlots;
         
         // TODO: Seek the optimal parameter (particularly coeff modulus)
@@ -120,7 +149,7 @@ namespace rlweOkvs
         Plaintext ptxt;
         // TODO: Maybe accelerated with vector iterators
         for (int i = 0; i < mNumBatch; i++) {
-            for (int j = 0 ; mNumSlots; j++) {
+            for (int j = 0 ; j < mNumSlots; j++) {
                 plainVec[j] = encoded[i*mNumSlots + j];
             }
             mBatchEncoder->encode(plainVec, ptxt);

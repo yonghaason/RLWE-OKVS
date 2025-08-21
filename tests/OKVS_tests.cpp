@@ -13,7 +13,7 @@ using namespace rlweOkvs;
 void encode_test(const oc::CLP& cmd)
 {
     u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
-    u32 w = cmd.getOr("w", 100);
+    u32 w = cmd.getOr("w", 134);
     u32 m = ceil(cmd.getOr("ratio", 1.16)*n);
     u64 logp = cmd.getOr("logp", 60);
     Modulus p(PlainModulus::Batching(8192, logp));
@@ -68,7 +68,7 @@ void encode_test(const oc::CLP& cmd)
 void decode_test(const oc::CLP& cmd)
 {
     u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
-    u32 w = cmd.getOr("w", 100);
+    u32 w = cmd.getOr("w", 134);
     u32 m = ceil(cmd.getOr("ratio", 1.16)*n);
     u64 logp = cmd.getOr("logp", 60);
     Modulus p(PlainModulus::Batching(8192, logp));
