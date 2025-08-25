@@ -70,11 +70,24 @@ namespace rlweOkvs
             if(c > L) L = c;
         }
         //여기까지 하면 t_s set 개수는 미리 설정 완료. 
+
+        //filled 배열 자료구조 무엇으로? (bitarray?)
+        //OKVS.Encode 알고리즘에 따라 원소들을 t_s 간격만큼 분배, 
+        //m을 넘을 경우 한 바퀴 돌아서 첫 자리 채워주는 알고리즘 필요.
+        
+        ///vector<uint64_t> t_set(mNumBatch*mM); <- 이게 L개 있어야 함
+
         
 
 
 
+
         //Batch
+
+        //vector<Plaintext> ptxtVec(L);  
+        //for i =0 ~ L-1
+        //mBatchEncoder->encode(t_s set Vec, ptxtVec[i]);
+        
     }
 
     /* 구현해야 할 부분 (8.21) */
@@ -84,6 +97,9 @@ namespace rlweOkvs
         std::vector<seal::Ciphertext> &decoded_in_he)
     {
         //PlainMult, CtxtAdd가 이루어질 부분
+
+        //evaluator.multiply_plain(encoded_in_he, ptxts, results)
+        //evaluator.add(ctxt1, ctxt2, total_ctxt)
     }
 
     void RpmtReceiver::init(uint32_t n, uint32_t logp, uint64_t numSlots)
