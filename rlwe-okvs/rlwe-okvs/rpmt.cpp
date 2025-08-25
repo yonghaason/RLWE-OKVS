@@ -1,6 +1,6 @@
 #include "rpmt.h"
 #include <memory>
-#include "rlwe-okvs/okvs.h"
+#include "okvs.h"
 
 using namespace std;
 using namespace seal;
@@ -50,12 +50,17 @@ namespace rlweOkvs
         //Make matrix Y
         assert (Y.size() == mN);
 
+        //임시로 key, seed 만들기(test용)
+        PRNG prng(oc::ZeroBlock);
+        vector<block> key(mN);
+        prng.get<block>(key);
+
         PrimeFieldOkvs okvs;
         okvs.setTimer(getTimer());
         okvs.init(Y.size(), mM, mW, mModulus);
         vector<uint64_t> bands_flat(mN*mW); // this is matrix Y
         vector<uint32_t> start_pos(mN);
-        okvs.generate_band(key, bands_flat, start_pos, seed);
+        okvs.generate_band(key, bands_flat, start_pos, oc::ZeroBlock);
 
         //get number of t_s set
         vector<uint32_t> start_freq(mNumSlots, 0);
@@ -78,7 +83,7 @@ namespace rlweOkvs
             uint64_t r = start_pos[i] % mNumSlots;
             uint64_t j = 0;
             while(true){
-                if !filled[j][r]{
+                if(!filled[j][r]){
                     for(size_t w = 0; w < mW; w++){
                         int p = start_pos[i] + w*mNumSlots;
                         if(p > mM) p = p - mM;
@@ -120,12 +125,12 @@ namespace rlweOkvs
         for(size_t i = 0; i < L; i++){
             Ciphertext acc, tmp;
             const size_t idx0 = i * mNumBatch;
-            evaluator.multiply_plain(encoded_in_he[0], ptxts[idx0], acc);
+            mEvaluator->multiply_plain(encoded_in_he[0], ptxts[idx0], acc);
 
-            for(size_t j = 1; j < mNumBatch; j++){
+            for(size_t j = 0; j < mNumBatch; j++){
                 const size_t idx = i * mNumBatch + j;
-                evaluator.multiply_plain(encoded_in_he[j], ptxts[idx], tmp);
-                evaluator.add_inplace(acc, tmp);
+                mEvaluator->multiply_plain(encoded_in_he[j], ptxts[idx], tmp);
+                mEvaluator->add_inplace(acc, tmp);
             }
             decoded_in_he[i] = move(acc);
         }
