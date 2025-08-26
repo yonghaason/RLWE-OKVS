@@ -1,6 +1,7 @@
 #include "rpmt.h"
-#include <memory>
 #include "okvs.h"
+#include <memory>
+
 
 using namespace std;
 using namespace seal;
@@ -25,22 +26,22 @@ namespace rlweOkvs
         parms.set_plain_modulus(mModulus);
         SEALContext context(parms);
 
-        mBatchEncoder = make_unique<BatchEncoder>(BatchEncoder(context));
-        mEvaluator = make_unique<Evaluator>(Evaluator(context));
+        mBatchEncoder = make_unique<BatchEncoder>(context);
+        mEvaluator = make_unique<Evaluator>(context);
     };
 
-    Proto RpmtSender::run(const std::vector<oc::block> &Y, Socket &chl)
-    {
-        vector<Plaintext> ptxts;
-        preprocess(Y, ptxts);
+    // Proto RpmtSender::run(const std::vector<oc::block> &Y, Socket &chl)
+    // {
+    //     vector<Plaintext> ptxts;=
+    //     preprocess(Y, ptxts);
 
-        vector<Ciphertext> encoded_in_he(mNumBatch);
-        co_await chl.recv(encoded_in_he);
+    //     vector<Ciphertext> encoded_in_he(mNumBatch);
+    //     co_await chl.recv(encoded_in_he);
 
-        vector<Ciphertext> decoded_in_he;
-        encrypted_decode(encoded_in_he, ptxts, decoded_in_he);
-        co_await chl.send(decoded_in_he);
-    }
+    //     vector<Ciphertext> decoded_in_he;
+    //     encrypted_decode(encoded_in_he, ptxts, decoded_in_he);
+    //     co_await chl.send(decoded_in_he);
+    // }
 
     /* 구현해야 할 부분 (8.21) */
     void RpmtSender::preprocess(
@@ -50,17 +51,12 @@ namespace rlweOkvs
         //Make matrix Y
         assert (Y.size() == mN);
 
-        //임시로 key, seed 만들기(test용)
-        PRNG prng(oc::ZeroBlock);
-        vector<block> key(mN);
-        prng.get<block>(key);
-
         PrimeFieldOkvs okvs;
         okvs.setTimer(getTimer());
         okvs.init(Y.size(), mM, mW, mModulus);
         vector<uint64_t> bands_flat(mN*mW); // this is matrix Y
         vector<uint32_t> start_pos(mN);
-        okvs.generate_band(key, bands_flat, start_pos, oc::ZeroBlock);
+        okvs.generate_band(Y, bands_flat, start_pos, oc::ZeroBlock);
 
         //get number of t_s set
         vector<uint32_t> start_freq(mNumSlots, 0);
@@ -76,35 +72,37 @@ namespace rlweOkvs
         }
 
         //Sequencing
+        setTimePoint("Start sequencing");
         vector<vector<uint64_t>> T_s(L, vector<uint64_t>(mM, 0));
-        vector<vector<bool>> filled(L, vector<bool>(mNumSlots, false));
+        oc::BitVector filled(L*mNumSlots);
 
         for(size_t i = 0; i < mN; i++){
             uint64_t r = start_pos[i] % mNumSlots;
             uint64_t j = 0;
             while(true){
-                if(!filled[j][r]){
+                if(!filled[j*mNumSlots+r]){
                     for(size_t w = 0; w < mW; w++){
-                        int p = start_pos[i] + w*mNumSlots;
+                        uint32_t p = start_pos[i] + w*mNumSlots;
                         if(p > mM) p = p - mM;
                         T_s[j][p] = bands_flat[i*mW+w];
                     }
-                    filled[j][r] = true;
+                    filled[j*mNumSlots+r] = 1;
                     break;
                 }
                 else j++;
             }
         }
+        setTimePoint("End sequencing");
         
         //Batch  
         vector<uint64_t> plainVec(mNumSlots);
         ptxts.resize(mNumBatch*L);
         size_t outIdx = 0;
 
-        for(int i = 0; i < L; i++){
-            for(int j = 0 ; j < mNumBatch; j++){
+        for(uint64_t i = 0; i < L; i++){
+            for(uint32_t j = 0 ; j < mNumBatch; j++){
                 const size_t offset = j * mNumSlots;
-                for(int k = 0; k < mNumSlots; k++){
+                for(uint64_t k = 0; k < mNumSlots; k++){
                     plainVec[k] = T_s[i][offset+k];
                 }
                 mBatchEncoder->encode(plainVec, ptxts[outIdx++]);
@@ -156,28 +154,28 @@ namespace rlweOkvs
         KeyGenerator keygen(context);
         SecretKey secret_key = keygen.secret_key();
 
-        mEncryptor = make_unique<Encryptor>(Encryptor(context, secret_key));
-        mBatchEncoder = make_unique<BatchEncoder>(BatchEncoder(context));
-        mDecryptor = make_unique<Decryptor>(Decryptor(context, secret_key));
+        mEncryptor = make_unique<Encryptor>(context, secret_key);
+        mBatchEncoder = make_unique<BatchEncoder>(context);
+        mDecryptor = make_unique<Decryptor>(context, secret_key);
     };
 
-    Proto RpmtReceiver::run(
-        const std::vector<oc::block> &X, 
-        oc::BitVector &results,
-        Socket &chl)
-    {
-        vector<Ciphertext> ctxts(mNumBatch);
-        encode_and_encrypt(X, ctxts);
+    // Proto RpmtReceiver::run(
+    //     const std::vector<oc::block> &X, 
+    //     oc::BitVector &results,
+    //     Socket &chl)
+    // {
+    //     vector<Ciphertext> ctxts(mNumBatch);
+    //     encode_and_encrypt(X, ctxts);
         
-        // TODO: use seal serialize to compress ctxts (into seed)
-        co_await chl.send(std::move(ctxts));
+    //     // TODO: use seal serialize to compress ctxts (into seed)
+    //     co_await chl.send(std::move(ctxts));
 
-        vector<Ciphertext> decoded_in_he;
-        co_await chl.recv(decoded_in_he);
+    //     vector<Ciphertext> decoded_in_he;
+    //     co_await chl.recv(decoded_in_he);
 
-        results.resize(their_size); // initialize 할 때 알려주자
-        decrypt(decoded_in_he, results);
-    }
+    //     results.resize(their_size); // initialize 할 때 알려주자
+    //     decrypt(decoded_in_he, results);
+    // }
 
     void RpmtReceiver::encode_and_encrypt(
         const std::vector<oc::block> &X, 
@@ -198,12 +196,21 @@ namespace rlweOkvs
         vector<uint64_t> plainVec(mNumSlots);
         Plaintext ptxt;
         // TODO: Maybe accelerated with vector iterators
-        for (int i = 0; i < mNumBatch; i++) {
-            for (int j = 0 ; j < mNumSlots; j++) {
+        for (uint32_t i = 0; i < mNumBatch; i++) {
+            for (uint64_t j = 0 ; j < mNumSlots; j++) {
                 plainVec[j] = encoded[i*mNumSlots + j];
             }
             mBatchEncoder->encode(plainVec, ptxt);
             mEncryptor->encrypt(ptxt, ctxts[i]);
         }
     }
+
+    void RpmtReceiver::decrypt(
+        std::vector<seal::Ciphertext> &decoded_in_he, 
+        oc::BitVector &results)
+    {
+        // 채우기
+        
+    }
+            
 }

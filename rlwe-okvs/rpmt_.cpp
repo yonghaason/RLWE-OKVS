@@ -25,8 +25,8 @@ namespace rlweOkvs
         parms.set_plain_modulus(mModulus);
         SEALContext context(parms);
 
-        mBatchEncoder = make_unique<BatchEncoder>(BatchEncoder(context));
-        mEvaluator = make_unique<Evaluator>(Evaluator(context));
+        unique_ptr<BatchEncoder> mBatchEncoder = make_unique<BatchEncoder>(context);
+        unique_ptr<Evaluator> mEvaluator = make_unique<Evaluator>(context);
     };
 
     Proto RpmtSender::run(const std::vector<oc::block> &Y, Socket &chl)
@@ -75,12 +75,12 @@ namespace rlweOkvs
         vector<vector<bool>> filled(L, vector<bool>(mNumSlots, false));
 
         for(size_t i = 0; i < mN; i++){
-            uint64_t r = start_pos[i] % mNumSlots;
-            uint64_t j = 0;
+            uint32_t r = start_pos[i] % mNumSlots;
+            uint32_t j = 0;
             while(true){
                 if !filled[j][r]{
                     for(size_t w = 0; w < mW; w++){
-                        int p = start_pos[i] + w*mNumSlots;
+                        uint32_t p = start_pos[i] + w*mNumSlots;
                         if(p > mM) p = p - mM;
                         T_s[j][p] = bands_flat[i*mW+w];
                     }
@@ -194,7 +194,7 @@ namespace rlweOkvs
         Plaintext ptxt;
         // TODO: Maybe accelerated with vector iterators
         for (int i = 0; i < mNumBatch; i++) {
-            for (int j = 0 ; j < mNumSlots; j++) {
+            for (int j = 1 ; j < mNumSlots; j++) {
                 plainVec[j] = encoded[i*mNumSlots + j];
             }
             mBatchEncoder->encode(plainVec, ptxt);

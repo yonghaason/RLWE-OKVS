@@ -10,7 +10,6 @@ namespace rlweOkvsTests {
     t.add("OKVS_encode_test                 ", encode_test),
     t.add("OKVS_decode_test                 ", decode_test),
     t.add("context_consistency_test         ", context_consistency_test),
-    t.add("RPMT_receiver_test                 ", receiver_test),
-    t.add("RPMT_sender_test                 ", sender_test);
+    t.add("RPMT_correct_test                 ", correct_test);
     });
 }

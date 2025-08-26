@@ -47,7 +47,7 @@ namespace rlweOkvs
             std::vector<seal::Ciphertext> &decoded_in_he
         );
 
-        Proto run(const std::vector<oc::block> &Y, Socket &chl);
+        // Proto run(const std::vector<oc::block> &Y, Socket &chl);
     };
 
     class RpmtReceiver: public oc::TimerAdapter
@@ -65,17 +65,16 @@ namespace rlweOkvs
         uint32_t mNumBatch;
 
         uint64_t mIndicatorStr;
-
         uint64_t their_size;
-
+        
     public:
 
         void init(uint32_t n, uint32_t logp, uint64_t numSlots);
 
-        Proto run(
-            const std::vector<oc::block> &X, 
-            oc::BitVector &results,
-            Socket &chl);
+        // Proto run(
+        //     const std::vector<oc::block> &X, 
+        //     oc::BitVector &results,
+        //     Socket &chl);
 
         void encode_and_encrypt(
             const std::vector<oc::block> &X, 

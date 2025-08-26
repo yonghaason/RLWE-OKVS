@@ -22,7 +22,7 @@ void encode_test(const oc::CLP& cmd)
     timer.setTimePoint("start");
 
     PRNG prng(oc::ZeroBlock);
-    vector<block> key(n);
+    vector<block> key(n); 
     vector<uint64_t> value(n);
 
     prng.get<block>(key);
