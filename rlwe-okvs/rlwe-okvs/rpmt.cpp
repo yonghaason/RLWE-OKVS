@@ -120,6 +120,7 @@ namespace rlweOkvs
         const size_t L = ptxts.size() / mNumBatch;
         decoded_in_he.resize(L);
 
+        setTimePoint("start decoding(PlainMult&CtxtAdd)");
         for(size_t i = 0; i < L; i++){
             Ciphertext acc, tmp;
             const size_t idx0 = i * mNumBatch;
@@ -132,6 +133,7 @@ namespace rlweOkvs
             }
             decoded_in_he[i] = move(acc);
         }
+        setTimePoint("end decoding(PlainMult&CtxtAdd)");
     }
 
     void RpmtReceiver::init(uint32_t n, uint32_t logp, uint64_t numSlots)
@@ -195,6 +197,7 @@ namespace rlweOkvs
 
         vector<uint64_t> plainVec(mNumSlots);
         Plaintext ptxt;
+        ctxts.resize(mNumBatch);
         // TODO: Maybe accelerated with vector iterators
         for (uint32_t i = 0; i < mNumBatch; i++) {
             for (uint64_t j = 0 ; j < mNumSlots; j++) {
@@ -209,8 +212,24 @@ namespace rlweOkvs
         std::vector<seal::Ciphertext> &decoded_in_he, 
         oc::BitVector &results)
     {
-        // 채우기
-        
+        //Decryption
+        const size_t L = decoded_in_he.size();
+        vector<Plaintext> ptxts(L);
+
+        for(size_t i = 0; i < L; i++){
+            mDecryptor->decrypt(decoded_in_he[i], ptxts[i]);
+        }
+
+        //Decode(Unbatch) & get results for OT
+        results.resize(L*mNumSlots);
+        vector<vector<uint64_t>> decodeVec(L, vector<uint64_t>(mNumSlots, 0));
+
+        for(size_t i = 0; i < L; i++){
+            mBatchEncoder->decode(ptxts[i], decodeVec[i]);
+            for(size_t j = 0; j < mNumSlots; j++){
+                results[i*mNumSlots+j] = (decodeVec[i][j] == mIndicatorStr) ? 1 : 0;
+            }
+        }
     }
             
 }
