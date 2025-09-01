@@ -11,6 +11,7 @@
 #include <vector>
 #include <cmath>
 #include <iostream>
+#include <unordered_set>
 
 using namespace std;
 using namespace oc;
@@ -27,21 +28,21 @@ void correct_test(const oc::CLP& cmd)
     timer.setTimePoint("start");
     rpmtSender.setTimer(timer);
     rpmtReceiver.setTimer(timer);
-    
+ 
     int n = 1 << 20, logp = 60, numSlots = 1 << 13;
 
     rpmtSender.init(n, logp, numSlots);
     rpmtReceiver.init(n, logp, numSlots);
+    rpmtSender.set_public_key(rpmtReceiver.public_key());
 
-
-    // X, Y 랜덤하게 채우고
-    // (일정부분은 겹치게)
-    PRNG prng(oc::ZeroBlock);
+    // GPT CODE
+    PRNG prng;
+    prng.SetSeed(oc::toBlock(0xDEADBEEF12345678ull, 0xBADC0FFEE0DDF00Dull));
     vector<block> X(n);
     vector<block> Y(n);
 
-    prng.get(X.data(), static_cast<u64>(n) * sizeof(oc::block));
-    prng.get(Y.data(), static_cast<u64>(n) * sizeof(oc::block));
+    prng.get(X.data(), static_cast<u64>(n));
+    prng.get(Y.data(), static_cast<u64>(n));
 
     u64 k = 1 + (prng.get<u64>() % static_cast<u64>(n)); //intersection
 
@@ -58,11 +59,15 @@ void correct_test(const oc::CLP& cmd)
     for (; itX != selX.end() && itY != selY.end(); ++itX, ++itY)
         Y[*itY] = X[*itX];
 
+    
+    //protocol starts
     timer.setTimePoint("test setting");
 
     vector<Plaintext> ptxts;
     rpmtSender.preprocess(Y, ptxts);
     timer.setTimePoint("preprocess from sender");
+
+    cout << "hi" << endl;
 
     vector<Ciphertext> encoded_in_he;
     rpmtReceiver.encode_and_encrypt(X, encoded_in_he);
@@ -75,6 +80,8 @@ void correct_test(const oc::CLP& cmd)
     oc::BitVector results; // initialize
     rpmtReceiver.decrypt(decoded_in_he, results);
     timer.setTimePoint("decrypt from receiver");
+
+    //GPT CODE
 
     // 예상하는 결과랑 result랑 맞는지 확인
     // results에서 1의 개수(=히트 수) 카운트
@@ -102,6 +109,7 @@ void correct_test(const oc::CLP& cmd)
         throw RTE_LOC; // 요구사항대로 던짐
     }
 
+    //GPT CODE END
 
     if (cmd.isSet("v")) {
         cout << endl;

@@ -25,6 +25,8 @@ namespace rlweOkvs
         uint64_t mNumSlots;
         unique_ptr<Evaluator> mEvaluator;
         unique_ptr<BatchEncoder> mBatchEncoder;
+        unique_ptr<Encryptor> mEncryptor;
+        shared_ptr<SEALContext> mContext;
         
         uint32_t mN;
         uint32_t mM;
@@ -33,6 +35,9 @@ namespace rlweOkvs
         
     public:
         void init(uint32_t n, uint32_t logp, uint64_t numSlots);
+
+        // get Receiver's public key
+        void set_public_key(const PublicKey &pk);
 
         // Y -> Sequencing, Batch, Plaintexts ...
         // Y -> random band, sequencing ..., 
@@ -55,6 +60,7 @@ namespace rlweOkvs
         oc::PRNG mPrng;
         Modulus mModulus;
         uint64_t mNumSlots;
+        shared_ptr<SEALContext> mContext;
         unique_ptr<Encryptor> mEncryptor;
         unique_ptr<BatchEncoder> mBatchEncoder;
         unique_ptr<Decryptor> mDecryptor;
@@ -84,5 +90,7 @@ namespace rlweOkvs
         void decrypt(
             std::vector<seal::Ciphertext> &decoded_in_he, 
             oc::BitVector &results);
+
+        const PublicKey& public_key() const { return mPublicKey; }
     };
 }

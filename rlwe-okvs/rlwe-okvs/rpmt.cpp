@@ -24,11 +24,17 @@ namespace rlweOkvs
         parms.set_coeff_modulus(CoeffModulus::BFVDefault(mNumSlots));
         mModulus = PlainModulus::Batching(mNumSlots, logp);
         parms.set_plain_modulus(mModulus);
-        SEALContext context(parms);
-
-        mBatchEncoder = make_unique<BatchEncoder>(context);
-        mEvaluator = make_unique<Evaluator>(context);
+        
+        mContext = make_shared<SEALContext>(parms);
+        mBatchEncoder = make_unique<BatchEncoder>(*mContext);
+        mEvaluator = make_unique<Evaluator>(*mContext);
     };
+
+    void RpmtSender::set_public_key(const seal::PublicKey &pk)
+    {
+        // Sender는 이미 init에서 mContext를 구성했다고 가정
+        mEncryptor = make_unique<Encryptor>(mContext, pk);
+    }   
 
     // Proto RpmtSender::run(const std::vector<oc::block> &Y, Socket &chl)
     // {
@@ -83,7 +89,7 @@ namespace rlweOkvs
                 if(!filled[j*mNumSlots+r]){
                     for(size_t w = 0; w < mW; w++){
                         uint32_t p = start_pos[i] + w*mNumSlots;
-                        if(p > mM) p = p - mM;
+                        if(p >= mM) p -= mM;
                         T_s[j][p] = bands_flat[i*mW+w];
                     }
                     filled[j*mNumSlots+r] = 1;
@@ -126,7 +132,7 @@ namespace rlweOkvs
             const size_t idx0 = i * mNumBatch;
             mEvaluator->multiply_plain(encoded_in_he[0], ptxts[idx0], acc);
 
-            for(size_t j = 0; j < mNumBatch; j++){
+            for(size_t j = 1; j < mNumBatch; j++){
                 const size_t idx = i * mNumBatch + j;
                 mEvaluator->multiply_plain(encoded_in_he[j], ptxts[idx], tmp);
                 mEvaluator->add_inplace(acc, tmp);
@@ -146,17 +152,19 @@ namespace rlweOkvs
         mM = ((ceil(1.16 * n) / mNumSlots) + 1) * mNumSlots;
         mW = 134; // FIXME
         mNumBatch = mM / mNumSlots;
+        mPrng.SetSeed(oc::toBlock(0x1234567890ABCDEFull, 0x0FEDCBA098765432ull));
         
         // TODO: Seek the optimal parameter (particularly coeff modulus)
         parms.set_coeff_modulus(CoeffModulus::BFVDefault(mNumSlots));
         mModulus = PlainModulus::Batching(mNumSlots, logp);
         parms.set_plain_modulus(mModulus);
         SEALContext context(parms);
-
         KeyGenerator keygen(context);
         SecretKey secret_key = keygen.secret_key();
-
-        mEncryptor = make_unique<Encryptor>(context, secret_key);
+        PublicKey public_key;
+        keygen.create_public_key(public_key);
+        
+        mEncryptor = make_unique<Encryptor>(context, public_key);
         mBatchEncoder = make_unique<BatchEncoder>(context);
         mDecryptor = make_unique<Decryptor>(context, secret_key);
     };
@@ -195,9 +203,10 @@ namespace rlweOkvs
         vector<uint64_t> encoded(mM);
         okvs.encode(X, val, encoded);
 
+        ctxts.resize(static_cast<size_t>(mNumBatch));
         vector<uint64_t> plainVec(mNumSlots);
         Plaintext ptxt;
-        ctxts.resize(mNumBatch);
+        
         // TODO: Maybe accelerated with vector iterators
         for (uint32_t i = 0; i < mNumBatch; i++) {
             for (uint64_t j = 0 ; j < mNumSlots; j++) {
