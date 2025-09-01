@@ -121,36 +121,17 @@ namespace rlweOkvs
         decoded_in_he.resize(L);
 
         setTimePoint("start decoding(PlainMult&CtxtAdd)");
-        for (size_t i = 0; i < L; ++i) {
+        for(size_t i = 0; i < L; i++){
             Ciphertext acc, tmp;
-            bool any_term = false;
+            const size_t idx0 = i * mNumBatch;
+            mEvaluator->multiply_plain(encoded_in_he[0], ptxts[idx0], acc);
 
-            // 모든 블록에 대해: 0-평문은 곱하지 않고 건너뜀
-            for (size_t b = 0; b < mNumBatch; ++b) {
-                const size_t idx = i * mNumBatch + b;
-                const Plaintext &pt = ptxts[idx];
-
-                if (pt.is_zero()) continue;   // ⬅ 0-평문 skip (중요)
-
-                mEvaluator->multiply_plain(encoded_in_he[b], pt, tmp);
-
-                if (!any_term) {
-                    acc = std::move(tmp);
-                    any_term = true;
-                } else {
-                    mEvaluator->add_inplace(acc, tmp);
-                }
+            for(size_t j = 0; j < mNumBatch; j++){
+                const size_t idx = i * mNumBatch + j;
+                mEvaluator->multiply_plain(encoded_in_he[j], ptxts[idx], tmp);
+                mEvaluator->add_inplace(acc, tmp);
             }
-
-            if (!any_term) {
-                // 이 행의 모든 항이 0 → 결과는 0이어야 함.
-                // 하지만 투명 0을 만들면 SEAL이 막으므로, 공개키로 '암호화된 0'을 생성해 반환.
-                if (!mEncryptor)
-                    throw std::runtime_error("RpmtSender: public key not set; cannot emit encrypted zero");
-                mEncryptor->encrypt_zero(acc);                 // ⬅ non-transparent zero
-            }
-
-            decoded_in_he[i] = std::move(acc);
+            decoded_in_he[i] = move(acc);
         }
         setTimePoint("end decoding(PlainMult&CtxtAdd)");
     }

@@ -66,11 +66,11 @@ void correct_test(const oc::CLP& cmd)
     rpmtSender.preprocess(Y, ptxts);
     timer.setTimePoint("preprocess from sender");
 
-    cout << "hi" << endl;
-
     vector<Ciphertext> encoded_in_he;
     rpmtReceiver.encode_and_encrypt(X, encoded_in_he);
     timer.setTimePoint("encode and encrypt from receiver");
+
+    cout << "hi" << endl;
 
     vector<Ciphertext> decoded_in_he;
     rpmtSender.encrypted_decode(encoded_in_he, ptxts, decoded_in_he);
