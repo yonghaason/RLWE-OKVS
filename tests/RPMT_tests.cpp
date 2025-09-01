@@ -33,7 +33,6 @@ void correct_test(const oc::CLP& cmd)
 
     rpmtSender.init(n, logp, numSlots);
     rpmtReceiver.init(n, logp, numSlots);
-    rpmtSender.set_public_key(rpmtReceiver.public_key());
 
     // GPT CODE
     PRNG prng;

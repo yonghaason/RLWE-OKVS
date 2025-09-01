@@ -91,6 +91,6 @@ namespace rlweOkvs
             std::vector<seal::Ciphertext> &decoded_in_he, 
             oc::BitVector &results);
 
-        const PublicKey& public_key() const { return mPublicKey; }
+        
     };
 }
