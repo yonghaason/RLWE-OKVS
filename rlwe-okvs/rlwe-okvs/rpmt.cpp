@@ -17,7 +17,8 @@ namespace rlweOkvs
 
         mN = n;
         mM = ((ceil(1.16 * n) / mNumSlots) + 1) * mNumSlots;
-        mW = 134; // 1.16 ; security paraemter = 40
+        // mW = 134; // 1.16 ; security paraemter = 40
+        mW = 15;
         mNumBatch = mM / mNumSlots;
         
         // TODO: Seek the optimal parameter (particularly coeff modulus)
@@ -108,6 +109,8 @@ namespace rlweOkvs
                 mBatchEncoder->encode(plainVec, ptxts[outIdx++]);
             }
         }
+
+        
     }
 
     /* 구현해야 할 부분 (8.21) */
@@ -118,21 +121,53 @@ namespace rlweOkvs
     {
         //PlainMult, CtxtAdd
         const size_t L = ptxts.size() / mNumBatch;
+
+        cout << "L = " << L << endl;
         decoded_in_he.resize(L);
 
         setTimePoint("start decoding(PlainMult&CtxtAdd)");
-        for(size_t i = 0; i < L; i++){
-            Ciphertext acc, tmp;
-            const size_t idx0 = i * mNumBatch;
-            mEvaluator->multiply_plain(encoded_in_he[0], ptxts[idx0], acc);
+        for (size_t i = 0; i < L; ++i) {
+            bool initialized = false;          // 첫 유효 항(비영 평문)을 만났는가?
+            Ciphertext tmp;
 
-            for(size_t j = 0; j < mNumBatch; j++){
+            for (size_t j = 0; j < mNumBatch; ++j) {
                 const size_t idx = i * mNumBatch + j;
-                mEvaluator->multiply_plain(encoded_in_he[j], ptxts[idx], tmp);
-                mEvaluator->add_inplace(acc, tmp);
+                const Plaintext &pt = ptxts[idx];
+
+                // ✅ 평문이 0이면 스킵
+                if (pt.is_zero())
+                    continue;
+
+                if (!initialized) {
+                    // 첫 유효 항을 바로 목적지에 기록
+                    mEvaluator->multiply_plain(encoded_in_he[j], pt, decoded_in_he[i]);
+                    initialized = true;
+                } else {
+                    // 이후 항들은 tmp에 곱해서 누적
+                    mEvaluator->multiply_plain(encoded_in_he[j], pt, tmp);
+                    mEvaluator->add_inplace(decoded_in_he[i], tmp);
+                }
             }
-            decoded_in_he[i] = move(acc);
+
+            // ✅ 모든 항이 0이었다면 결과는 0이어야 함.
+            //    '투명 암호문'을 피하려고 공개키로 암호화된 0을 만들어 넣는다.
+            if (!initialized) {
+                if (!mEncryptor) {
+                    throw std::runtime_error(
+                        "RpmtSender::encrypted_decode: all terms were zero, "
+                        "but Encryptor is not set. Call set_public_key() first.");
+                }
+                // SEAL 버전에 따라 아래 둘 중 하나를 사용
+                // 1) 지원되면:
+                mEncryptor->encrypt_zero(decoded_in_he[i]);
+                // 2) (대안) 위 오버로드가 없다면:
+                // Plaintext z("0");
+                // mEncryptor->encrypt(z, decoded_in_he[i]);
+            }
         }
+
+        cout << "end decoding" << endl;
+        
         setTimePoint("end decoding(PlainMult&CtxtAdd)");
     }
 
@@ -144,9 +179,10 @@ namespace rlweOkvs
 
         mN = n;
         mM = ((ceil(1.16 * n) / mNumSlots) + 1) * mNumSlots;
-        mW = 134; // FIXME
+        // mW = 134; // FIXME
+        mW = 15;
         mNumBatch = mM / mNumSlots;
-        mPrng.SetSeed(oc::toBlock(0x1234567890ABCDEFull, 0x0FEDCBA098765432ull));
+        mPrng.SetSeed(oc::toBlock(0xDEADBEEF12345678ull, 0xBADC0FFEE0DDF00Dull));
         
         // TODO: Seek the optimal parameter (particularly coeff modulus)
         parms.set_coeff_modulus(CoeffModulus::BFVDefault(mNumSlots));
@@ -196,6 +232,14 @@ namespace rlweOkvs
 
         vector<uint64_t> encoded(mM);
         okvs.encode(X, val, encoded);
+
+        vector<uint64_t> encoded_spacing(mM);
+        for (uint32_t i = 0; i < encoded.size(); i++) {
+            uint32_t start = i / mNumSlots;
+            uint32_t space = i % mNumSlots;
+            encoded_spacing[i] = encoded[start + mNumSlots*space];
+        }
+        encoded = encoded_spacing;
 
         ctxts.resize(static_cast<size_t>(mNumBatch));
         vector<uint64_t> plainVec(mNumSlots);

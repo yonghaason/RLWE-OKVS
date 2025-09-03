@@ -29,7 +29,7 @@ void correct_test(const oc::CLP& cmd)
     rpmtSender.setTimer(timer);
     rpmtReceiver.setTimer(timer);
  
-    int n = 1 << 20, logp = 60, numSlots = 1 << 13;
+    int n = 1 << 17, logp = 60, numSlots = 1 << 13;
 
     rpmtSender.init(n, logp, numSlots);
     rpmtReceiver.init(n, logp, numSlots);
@@ -57,7 +57,6 @@ void correct_test(const oc::CLP& cmd)
     auto itY = selY.begin();
     for (; itX != selX.end() && itY != selY.end(); ++itX, ++itY)
         Y[*itY] = X[*itX];
-
     
     //protocol starts
     timer.setTimePoint("test setting");
@@ -70,12 +69,12 @@ void correct_test(const oc::CLP& cmd)
     rpmtReceiver.encode_and_encrypt(X, encoded_in_he);
     timer.setTimePoint("encode and encrypt from receiver");
 
-    cout << "hi" << endl;
+    // 여까기진 정상 작동
 
     vector<Ciphertext> decoded_in_he;
     rpmtSender.encrypted_decode(encoded_in_he, ptxts, decoded_in_he);
     timer.setTimePoint("encrypted decode from sender");
-    
+
     oc::BitVector results; // initialize
     rpmtReceiver.decrypt(decoded_in_he, results);
     timer.setTimePoint("decrypt from receiver");
