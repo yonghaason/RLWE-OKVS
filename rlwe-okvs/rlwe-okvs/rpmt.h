@@ -36,22 +36,17 @@ namespace rlweOkvs
     public:
         void init(uint32_t n, uint32_t logp, uint64_t numSlots);
 
-        // get Receiver's public key
-        void set_public_key(const PublicKey &pk);
-
-        // Y -> Sequencing, Batch, Plaintexts ...
-        // Y -> random band, sequencing ..., 
         void preprocess(
             const std::vector<oc::block> &Y,
-            std::vector<seal::Plaintext> &ptxts);
+            std::vector<seal::Plaintext> &ptxts_diag,
+            std::vector<seal::Plaintext> &ptxts_sdiag);
 
-        // After receiving ctxts
         void encrypted_decode(
             const std::vector<seal::Ciphertext> &encoded_in_he,
-            const std::vector<seal::Plaintext> &ptxts,
-            std::vector<seal::Ciphertext> &decoded_in_he
-        );
-
+            const std::vector<seal::Ciphertext> &encoded_in_he_shift,
+            const std::vector<seal::Plaintext> &ptxts_diag,
+            const std::vector<seal::Plaintext> &ptxts_sdiag,
+            std::vector<seal::Ciphertext> &decoded_in_he);
         // Proto run(const std::vector<oc::block> &Y, Socket &chl);
     };
 
@@ -84,7 +79,8 @@ namespace rlweOkvs
 
         void encode_and_encrypt(
             const std::vector<oc::block> &X, 
-            std::vector<seal::Ciphertext> &ctxts
+            std::vector<seal::Ciphertext> &ctxts,
+            std::vector<seal::Ciphertext> &ctxts_shift
         );
 
         void decrypt(

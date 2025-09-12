@@ -1,7 +1,10 @@
 #include "rpmt.h"
 #include "okvs.h"
+#include "seal/util/uintarithsmallmod.h"
+#include "seal/util/numth.h"
 #include <memory>
 
+#include <set>
 
 using namespace std;
 using namespace seal;
@@ -16,13 +19,13 @@ namespace rlweOkvs
         parms.set_poly_modulus_degree(mNumSlots);
 
         mN = n;
-        mM = ((ceil(1.16 * n) / mNumSlots) + 1) * mNumSlots;
-        // mW = 134; // 1.16 ; security paraemter = 40
-        mW = 15;
+        mM = (ceil((1.16 * n) / mNumSlots) + 1) * mNumSlots;
+        mW = 134; // 1.16 ; security paraemter = 40
         mNumBatch = mM / mNumSlots;
         
         // TODO: Seek the optimal parameter (particularly coeff modulus)
-        parms.set_coeff_modulus(CoeffModulus::BFVDefault(mNumSlots));
+        // parms.set_coeff_modulus(CoeffModulus::BFVDefault(mNumSlots));
+        parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, { 48, 48, 48, 50}));
         mModulus = PlainModulus::Batching(mNumSlots, logp);
         parms.set_plain_modulus(mModulus);
         
@@ -33,7 +36,7 @@ namespace rlweOkvs
 
     // Proto RpmtSender::run(const std::vector<oc::block> &Y, Socket &chl)
     // {
-    //     vector<Plaintext> ptxts;=
+    //     vector<Plaintext> ptxts;
     //     preprocess(Y, ptxts);
 
     //     vector<Ciphertext> encoded_in_he(mNumBatch);
@@ -44,20 +47,30 @@ namespace rlweOkvs
     //     co_await chl.send(decoded_in_he);
     // }
 
-    /* 구현해야 할 부분 (8.21) */
     void RpmtSender::preprocess(
         const std::vector<oc::block> &Y,
-        std::vector<seal::Plaintext> &ptxts)
+        std::vector<seal::Plaintext> &ptxts_diag,
+        std::vector<seal::Plaintext> &ptxts_sdiag)
     {
         //Make matrix Y
         assert (Y.size() == mN);
 
         PrimeFieldOkvs okvs;
-        okvs.setTimer(getTimer());
+        // okvs.setTimer(getTimer());
         okvs.init(Y.size(), mM, mW, mModulus);
         vector<uint64_t> bands_flat(mN*mW); // this is matrix Y
         vector<uint32_t> start_pos(mN);
         okvs.generate_band(Y, bands_flat, start_pos, oc::ZeroBlock);
+
+        setTimePoint("Sender::Generate Bands");
+
+        vector<uint32_t> start_pos_spacing(mN);
+        for (uint32_t i = 0; i < mN; i++) {
+            auto position = start_pos[i];
+            uint32_t q = position / mNumBatch;
+            uint32_t r = position % mNumBatch;
+            start_pos_spacing[i] = r * mNumSlots + q;
+        }
 
         //get number of t_s set
         vector<uint32_t> start_freq(mNumSlots, 0);
@@ -66,109 +79,114 @@ namespace rlweOkvs
         uint32_t* f = start_freq.data();
 
         for(size_t i = 0; i < mN; ++i){
-            uint64_t r = start_pos[i] % mNumSlots; 
-            //start_pos[i] = r;
+            uint64_t r = start_pos_spacing[i] % mNumSlots; 
             uint32_t c = ++f[static_cast<size_t>(r)];
             if(c > L) L = c;
         }
 
         //Sequencing
-        setTimePoint("Start sequencing");
-        vector<vector<uint64_t>> T_s(L, vector<uint64_t>(mM, 0));
-        oc::BitVector filled(L*mNumSlots);
-
+        vector<vector<uint64_t>> T_diag(L, vector<uint64_t>(mM, 0));
+        vector<vector<uint64_t>> T_sdiag(L, vector<uint64_t>(mM, 0));
+        vector<oc::BitVector> filled(L);
+        for (size_t i = 0; i < L; i++) {
+            filled[i].resize(mNumSlots);
+        }
+        
+        // TODO: Fast Sequencing? Filled 쓰지말고 current ball num 기억하면 될듯
         for(size_t i = 0; i < mN; i++){
-            uint64_t r = start_pos[i] % mNumSlots;
-            uint64_t j = 0;
+            uint64_t binidx = start_pos_spacing[i] % mNumSlots;
+            uint64_t ballnum = 0;
             while(true){
-                if(!filled[j*mNumSlots+r]){
+                if(!filled[ballnum][binidx]){
+                    uint32_t pos = start_pos_spacing[i];
+                    bool wrap = false;
+                    // TODO: If 없이 optimize 가능 (pos -> mM 얼마나 남은지 계산해서)
                     for(size_t w = 0; w < mW; w++){
-                        uint32_t p = start_pos[i] + w*mNumSlots;
-                        if(p >= mM) p -= mM;
-                        T_s[j][p] = bands_flat[i*mW+w];
+                        if(pos >= mM) {
+                            pos = pos - mM;
+                            wrap = true;
+                        }
+                        if (wrap) T_sdiag[ballnum][pos] = bands_flat[i*mW+w];
+                        else T_diag[ballnum][pos] = bands_flat[i*mW+w];
+                        pos += mNumSlots;
                     }
-                    filled[j*mNumSlots+r] = 1;
+                    filled[ballnum][binidx] = 1;
                     break;
                 }
-                else j++;
+                else ballnum++;
             }
         }
-        setTimePoint("End sequencing");
-        
+        setTimePoint("Sender::Sequencing");
+
         //Batch  
         vector<uint64_t> plainVec(mNumSlots);
-        ptxts.resize(mNumBatch*L);
+        ptxts_diag.resize(mNumBatch*L);
+        ptxts_sdiag.resize(mNumBatch*L);
+        
         size_t outIdx = 0;
 
         for(uint64_t i = 0; i < L; i++){
             for(uint32_t j = 0 ; j < mNumBatch; j++){
                 const size_t offset = j * mNumSlots;
                 for(uint64_t k = 0; k < mNumSlots; k++){
-                    plainVec[k] = T_s[i][offset+k];
+                    plainVec[k] = T_diag[i][offset+k];
                 }
-                mBatchEncoder->encode(plainVec, ptxts[outIdx++]);
+                mBatchEncoder->encode(plainVec, ptxts_diag[outIdx]);
+                for(uint64_t k = 0; k < mNumSlots; k++){
+                    plainVec[k] = T_sdiag[i][offset+k];
+                }
+                mBatchEncoder->encode(plainVec, ptxts_sdiag[outIdx++]);
             }
         }
-
-        
+        setTimePoint("Sender::BatchEncode");
     }
 
-    /* 구현해야 할 부분 (8.21) */
     void RpmtSender::encrypted_decode(
         const std::vector<seal::Ciphertext> &encoded_in_he,
-        const std::vector<seal::Plaintext> &ptxts,
+        const std::vector<seal::Ciphertext> &encoded_in_he_shift,
+        const std::vector<seal::Plaintext> &ptxts_diag,
+        const std::vector<seal::Plaintext> &ptxts_sdiag,
         std::vector<seal::Ciphertext> &decoded_in_he)
     {
         //PlainMult, CtxtAdd
-        const size_t L = ptxts.size() / mNumBatch;
+        const size_t L = ptxts_diag.size() / mNumBatch;
 
-        cout << "L = " << L << endl;
         decoded_in_he.resize(L);
 
-        setTimePoint("start decoding(PlainMult&CtxtAdd)");
         for (size_t i = 0; i < L; ++i) {
-            bool initialized = false;          // 첫 유효 항(비영 평문)을 만났는가?
+            bool initialized = false;
             Ciphertext tmp;
 
             for (size_t j = 0; j < mNumBatch; ++j) {
                 const size_t idx = i * mNumBatch + j;
-                const Plaintext &pt = ptxts[idx];
+                const Plaintext &pt_diag = ptxts_diag[idx];
+                const Plaintext &pt_sdiag = ptxts_sdiag[idx];
 
-                // ✅ 평문이 0이면 스킵
-                if (pt.is_zero())
-                    continue;
-
-                if (!initialized) {
-                    // 첫 유효 항을 바로 목적지에 기록
-                    mEvaluator->multiply_plain(encoded_in_he[j], pt, decoded_in_he[i]);
-                    initialized = true;
-                } else {
-                    // 이후 항들은 tmp에 곱해서 누적
-                    mEvaluator->multiply_plain(encoded_in_he[j], pt, tmp);
-                    mEvaluator->add_inplace(decoded_in_he[i], tmp);
+                if (!pt_diag.is_zero()) {
+                    if (!initialized) {
+                        mEvaluator->multiply_plain(encoded_in_he[j], pt_diag, decoded_in_he[i]);
+                        initialized = true;
+                    }
+                    else {    
+                        mEvaluator->multiply_plain(encoded_in_he[j], pt_diag, tmp);
+                        mEvaluator->add_inplace(decoded_in_he[i], tmp);
+                    }
                 }
-            }
 
-            // ✅ 모든 항이 0이었다면 결과는 0이어야 함.
-            //    '투명 암호문'을 피하려고 공개키로 암호화된 0을 만들어 넣는다.
-            if (!initialized) {
-                if (!mEncryptor) {
-                    throw std::runtime_error(
-                        "RpmtSender::encrypted_decode: all terms were zero, "
-                        "but Encryptor is not set. Call set_public_key() first.");
+                if (!pt_sdiag.is_zero()) {
+                    if (!initialized) {
+                        mEvaluator->multiply_plain(encoded_in_he_shift[j], pt_sdiag, decoded_in_he[i]);
+                        initialized = true;
+                    }
+                    else {    
+                        mEvaluator->multiply_plain(encoded_in_he_shift[j], pt_sdiag, tmp);
+                        mEvaluator->add_inplace(decoded_in_he[i], tmp);
+                    }
                 }
-                // SEAL 버전에 따라 아래 둘 중 하나를 사용
-                // 1) 지원되면:
-                mEncryptor->encrypt_zero(decoded_in_he[i]);
-                // 2) (대안) 위 오버로드가 없다면:
-                // Plaintext z("0");
-                // mEncryptor->encrypt(z, decoded_in_he[i]);
             }
         }
-
-        cout << "end decoding" << endl;
         
-        setTimePoint("end decoding(PlainMult&CtxtAdd)");
+        setTimePoint("Sender::Encrypted OKVS Decoding");
     }
 
     void RpmtReceiver::init(uint32_t n, uint32_t logp, uint64_t numSlots)
@@ -178,14 +196,14 @@ namespace rlweOkvs
         parms.set_poly_modulus_degree(mNumSlots);
 
         mN = n;
-        mM = ((ceil(1.16 * n) / mNumSlots) + 1) * mNumSlots;
-        // mW = 134; // FIXME
-        mW = 15;
+        mM = (ceil((1.16 * n) / mNumSlots) + 1) * mNumSlots;
+        mW = 134; // FIXME
         mNumBatch = mM / mNumSlots;
         mPrng.SetSeed(oc::toBlock(0xDEADBEEF12345678ull, 0xBADC0FFEE0DDF00Dull));
         
         // TODO: Seek the optimal parameter (particularly coeff modulus)
-        parms.set_coeff_modulus(CoeffModulus::BFVDefault(mNumSlots));
+        // parms.set_coeff_modulus(CoeffModulus::BFVDefault(mNumSlots));
+        parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, { 48, 48, 48, 50}));
         mModulus = PlainModulus::Batching(mNumSlots, logp);
         parms.set_plain_modulus(mModulus);
         SEALContext context(parms);
@@ -219,29 +237,78 @@ namespace rlweOkvs
 
     void RpmtReceiver::encode_and_encrypt(
         const std::vector<oc::block> &X, 
-        std::vector<seal::Ciphertext> &ctxts
+        std::vector<seal::Ciphertext> &ctxts,
+        std::vector<seal::Ciphertext> &ctxts_shift
     )
     {
         assert (X.size() == mN);
-        mIndicatorStr = mPrng.get<uint64_t>();
+        mIndicatorStr = seal::util::barrett_reduce_64(mPrng.get<uint64_t>(), mModulus);
         vector<uint64_t> val(mN, mIndicatorStr);
-        
+
         PrimeFieldOkvs okvs;
-        okvs.setTimer(getTimer());
+        // okvs.setTimer(getTimer());
         okvs.init(X.size(), mM, mW, mModulus);
 
         vector<uint64_t> encoded(mM);
-        okvs.encode(X, val, encoded);
+
+        if (!okvs.encode(X, val, encoded)) throw RTE_LOC;
+        
+        // vector<uint64_t> decoded(mN);
+        // okvs.decode(X, encoded, decoded);
+
+        // for (size_t i = 0; i < val.size(); i++) {
+        //     if (val[i] != decoded[i]) {
+        //         throw RTE_LOC;
+        //     }
+        // }
+        // std::cout << "Encode is correct" << std::endl;
 
         vector<uint64_t> encoded_spacing(mM);
         for (uint32_t i = 0; i < encoded.size(); i++) {
-            uint32_t start = i / mNumSlots;
-            uint32_t space = i % mNumSlots;
-            encoded_spacing[i] = encoded[start + mNumSlots*space];
+            uint32_t q = i / mNumSlots;
+            uint32_t r = i % mNumSlots;
+            encoded_spacing[i] = encoded[r * mNumBatch + q];
         }
+
+        // vector<uint64_t> bands_flat(mN*mW);
+        // vector<uint32_t> start_pos(mN);
+        // okvs.generate_band(X, bands_flat, start_pos, oc::ZeroBlock);
+        // vector<uint32_t> start_pos_spacing(mN);
+        // for (uint32_t i = 0; i< start_pos.size(); i++) {
+        //     auto position = start_pos[i];
+        //     uint32_t q = position / mNumBatch;
+        //     uint32_t r = position % mNumBatch;
+        //     start_pos_spacing[i] = r * mNumSlots + q;
+        // }
+        // mat_vec_mult_spaced_band_flat(bands_flat, start_pos_spacing, mNumSlots, mModulus, encoded_spacing, decoded);
+
+        // auto cnt = 0;
+        // for (size_t i = 0; i < val.size(); i++) {
+        //     if (val[i] != decoded[i]) {
+        //         cout << i << ": " << val[i] << ", " << decoded[i] << endl;
+        //         const uint64_t *__restrict row = bands_flat.data() + static_cast<size_t>(i) * mW;
+
+        //         auto position = start_pos_spacing[i];
+
+        //         for (uint32_t j = 0; j < mW; ++j){   
+        //             if (position >= mM) position = position - mM + 1;
+        //             if (encoded[start_pos[i] + j] != encoded_spacing[position]) {
+        //                 std::cout << encoded[start_pos[i] + j] << "(before spacing) v.s. " << encoded_spacing[position] << "(after spacing)" << std::endl;
+        //             }
+        //             position += mNumSlots;
+        //         }
+        //         cnt++;
+        //     }
+        // }
+        // if (cnt) throw RTE_LOC;
+        // std::cout << "Spacing is correct" << std::endl;
+
         encoded = encoded_spacing;
 
+        setTimePoint("Receiver::OKVS Encoding");
+
         ctxts.resize(static_cast<size_t>(mNumBatch));
+        ctxts_shift.resize(static_cast<size_t>(mNumBatch));
         vector<uint64_t> plainVec(mNumSlots);
         Plaintext ptxt;
         
@@ -253,6 +320,22 @@ namespace rlweOkvs
             mBatchEncoder->encode(plainVec, ptxt);
             mEncryptor->encrypt(ptxt, ctxts[i]);
         }
+
+        // TODO: Fast Shift?
+        for (uint32_t i = 0; i < mNumBatch - 1; i++) {
+            for (uint64_t j = 0 ; j < mNumSlots; j++) {
+                plainVec[j] = encoded[i*mNumSlots + j + 1];
+            }
+            mBatchEncoder->encode(plainVec, ptxt);
+            mEncryptor->encrypt(ptxt, ctxts_shift[i]);
+        }
+        for (uint64_t j = 0 ; j < mNumSlots-1; j++) {
+            plainVec[j] = encoded[(mNumBatch-1)*mNumSlots + j + 1];
+        }
+        plainVec[mNumSlots-1] = encoded[0];
+        mBatchEncoder->encode(plainVec, ptxt);
+        mEncryptor->encrypt(ptxt, ctxts_shift[mNumBatch - 1]);
+        setTimePoint("Receiver::Encryption");
     }
 
     void RpmtReceiver::decrypt(
@@ -262,6 +345,10 @@ namespace rlweOkvs
         //Decryption
         const size_t L = decoded_in_he.size();
         vector<Plaintext> ptxts(L);
+
+        
+        cout << "Noise Budget: "
+        << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
 
         for(size_t i = 0; i < L; i++){
             mDecryptor->decrypt(decoded_in_he[i], ptxts[i]);
@@ -277,6 +364,7 @@ namespace rlweOkvs
                 results[i*mNumSlots+j] = (decodeVec[i][j] == mIndicatorStr) ? 1 : 0;
             }
         }
+        setTimePoint("Receiver::Decrypt");
     }
             
 }

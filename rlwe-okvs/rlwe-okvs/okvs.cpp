@@ -21,17 +21,61 @@ namespace rlweOkvs
     {
         auto n = start_pos.size();
         auto w = bands_flat.size() / n;
-
+        
+        // std::cout << "first inner product (before spacing)" << std::endl;
         for (uint32_t i = 0; i < n; ++i)
         {
             const uint64_t *__restrict row = bands_flat.data() + static_cast<size_t>(i) * w;
             uint64_t acc = 0;
-            for (uint32_t j = 0; j < w; ++j)
+            for (uint32_t j = 0; j < w; ++j){
                 acc = multiply_add_uint_mod(row[j], x[start_pos[i] + j], acc, modulus);
+                // if (i == 0 && j <= 10) {
+                //     std::cout << row[j] << " X " << x[start_pos[i] + j] << std::endl;
+                // }
+            }
 
             result[i] = acc;
         }
     };
+
+    void mat_vec_mult_spaced_band_flat(
+        const std::vector<uint64_t> &bands_flat,
+        const std::vector<uint32_t> &start_pos,
+        uint32_t spacing,
+        const seal::Modulus &modulus,
+        const std::vector<uint64_t> &x,
+        std::vector<uint64_t> &result)
+{
+    const size_t n = start_pos.size();
+    const size_t m = x.size();
+    if (m % spacing != 0)
+        throw std::invalid_argument("row size should be divisible by t");
+    const size_t b = m / spacing;
+
+    if (result.size() != n)
+        result.resize(n);
+
+    const size_t w = bands_flat.size() / n;
+
+    // std::cout << "first inner product" << std::endl;
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        const uint64_t *__restrict row = bands_flat.data() + static_cast<size_t>(i) * w;
+        uint64_t acc = 0;
+        auto position = start_pos[i];
+            
+        for (uint32_t j = 0; j < w; ++j) {
+            if (position >= m) position = position - m + 1;
+            acc = multiply_add_uint_mod(row[j], x[position], acc, modulus);
+            // if (i == 0 && j <= 10) {
+            //     std::cout << row[j] << " X " << x[position] << std::endl;
+            // }
+            position += spacing;
+        }
+
+        result[i] = acc;
+    }
+}
 
     void PrimeFieldOkvs::generate_band(
         const std::vector<oc::block> &key,

@@ -15,12 +15,21 @@ namespace rlweOkvs
         const seal::Modulus &modulus,
         std::vector<uint64_t> &result);
 
+    void mat_vec_mult_spaced_band_flat(
+        const std::vector<uint64_t> &bands_flat,
+        const std::vector<uint32_t> &start_pos,
+        uint32_t t,
+        const seal::Modulus &modulus,
+        const std::vector<uint64_t> &x,
+        std::vector<uint64_t> &result);
+
     class PrimeFieldOkvs : public oc::TimerAdapter
     {
         seal::Modulus mModulus;
         uint32_t mN;
         uint32_t mM;
         uint32_t mW; // random-band weight
+        uint32_t mSpacing;
 
         public:
             void init(uint32_t n, uint32_t m, uint32_t w, seal::Modulus modulus) 
