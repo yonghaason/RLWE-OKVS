@@ -25,21 +25,30 @@ namespace rlweOkvs
         uint64_t mNumSlots;
         unique_ptr<Evaluator> mEvaluator;
         unique_ptr<BatchEncoder> mBatchEncoder;
-        unique_ptr<Encryptor> mEncryptor;
         shared_ptr<SEALContext> mContext;
         
         uint32_t mN;
         uint32_t mM;
         uint32_t mW; 
         uint32_t mNumBatch;
+
+        uint32_t mNreceiver;
         
     public:
-        void init(uint32_t n, uint32_t logp, uint64_t numSlots);
+
+        void init(uint32_t n, uint32_t nReceiver, uint32_t logp, uint64_t numSlots);
+
+        Proto run(
+            const std::vector<oc::block> &Y, 
+            std::vector<uint32_t> &ot_idx,
+            Socket &chl);
 
         void preprocess(
             const std::vector<oc::block> &Y,
             std::vector<seal::Plaintext> &ptxts_diag,
-            std::vector<seal::Plaintext> &ptxts_sdiag);
+            std::vector<seal::Plaintext> &ptxts_sdiag,
+            std::vector<uint32_t> &bin_sizes,
+            std::vector<uint32_t> &ot_idx);
 
         void encrypted_decode(
             const std::vector<seal::Ciphertext> &encoded_in_he,
@@ -47,7 +56,6 @@ namespace rlweOkvs
             const std::vector<seal::Plaintext> &ptxts_diag,
             const std::vector<seal::Plaintext> &ptxts_sdiag,
             std::vector<seal::Ciphertext> &decoded_in_he);
-        // Proto run(const std::vector<oc::block> &Y, Socket &chl);
     };
 
     class RpmtReceiver: public oc::TimerAdapter
@@ -66,27 +74,35 @@ namespace rlweOkvs
         uint32_t mNumBatch;
 
         uint64_t mIndicatorStr;
-        uint64_t their_size;
+        uint64_t mNsender;
         
     public:
 
-        void init(uint32_t n, uint32_t logp, uint64_t numSlots);
+        void init(uint32_t n, uint32_t nSender, uint32_t logp, uint64_t numSlots);
 
-        // Proto run(
-        //     const std::vector<oc::block> &X, 
-        //     oc::BitVector &results,
-        //     Socket &chl);
+        Proto run(
+            const std::vector<oc::block> &X, 
+            oc::BitVector &results,
+            Socket &chl);
+
+        Proto run_opt(
+            const std::vector<oc::block> &X, 
+            oc::BitVector &results,
+            Socket &chl);
 
         void encode_and_encrypt(
             const std::vector<oc::block> &X, 
-            std::vector<seal::Ciphertext> &ctxts,
-            std::vector<seal::Ciphertext> &ctxts_shift
-        );
+            stringstream &ctxtstream);
 
         void decrypt(
-            std::vector<seal::Ciphertext> &decoded_in_he, 
-            oc::BitVector &results);
+            const std::vector<seal::Ciphertext> &decoded_in_he, 
+            const std::vector<uint32_t> &bin_sizes,
+            oc::BitVector &results);        
 
-        
+        void encode_and_encrypt_noserialize(
+            const std::vector<oc::block> &X, 
+            std::vector<seal::Ciphertext> &ctxts,
+            std::vector<seal::Ciphertext> &ctxts_shift);
+
     };
 }

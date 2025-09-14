@@ -2,6 +2,7 @@ set(SRCS
 	OKVS_tests.cpp
     SEAL_tests.cpp
     RPMT_tests.cpp
+    PSU_tests.cpp
     UnitTests.cpp
 )
 
