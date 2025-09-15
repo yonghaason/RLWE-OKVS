@@ -74,16 +74,15 @@ namespace rlweOkvs
         oc::block seed)
 {
     PRNG prng;
-    uint64_t tmp;
-
     // Generate random-band matrix
+    
 #pragma GCC unroll 16 
     for (uint32_t i = 0; i < mN; i++) {
         prng.SetSeed(key[i] ^ seed);
         start_pos[i] = prng.get<uint32_t>() % (mM-mW);
+        prng.get<uint64_t>(bands_flat.data() + i*mW, mW);
         for (uint32_t j = 0; j < mW; j++) {
-            tmp = prng.get<uint64_t>();
-            bands_flat[i*mW + j] = barrett_reduce_64(tmp, mModulus);
+            bands_flat[i*mW + j] = barrett_reduce_64(bands_flat[i*mW + j], mModulus);
         }
     }
     setTimePoint("OKVS: Generate Band");

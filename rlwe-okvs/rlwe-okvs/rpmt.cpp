@@ -46,7 +46,9 @@ namespace rlweOkvs
         SEALContext context = *mContext;
 
         string recvstring;
-        co_await chl.recvResize(recvstring);        
+        co_await chl.recvResize(recvstring);
+        cout << "Sender receives " << mNumBatch << " Ctxts of OKVS Encoding, "
+             << recvstring.size() << " Bytes" << endl;
 
         stringstream recvstream;
         recvstream.write(recvstring.data(), recvstring.size());
@@ -71,6 +73,9 @@ namespace rlweOkvs
             auto byte = decoded_in_he[i].save(sendstream);
             if (i == 0) cout << "result ctxt in bytes: " << byte << endl;
         }
+
+        cout << "Sender sends " << decoded_in_he.size() << " decoded ctxts, "
+             << sendstream.str().size() << " Bytes" << endl;
 
         co_await chl.send(decoded_in_he.size());        
         co_await chl.send(move(sendstream.str()));
@@ -103,42 +108,65 @@ namespace rlweOkvs
         }
 
         // Optimized Sequencing
+        std::vector<uint64_t> T_diag_flat;    // L * mM
+        std::vector<uint64_t> T_sdiag_flat;   // L * mM
+        
+        std::vector<std::vector<uint32_t>> bins_items(mNumSlots);
+        bins_items.reserve(mNumSlots);
+        std::vector<uint32_t> item_binidx(mN);
+        std::vector<uint32_t> item_matrix_idx(mN);
+
+        for (uint32_t i = 0; i < mN; ++i) {
+            uint32_t pos = start_pos_spacing[i];
+            uint32_t binidx = pos % mNumSlots;
+            item_binidx[i] = binidx;
+            item_matrix_idx[i] = bins_items[binidx].size();
+            bins_items[binidx].push_back(i);
+        }
+
         bin_sizes.resize(mNumSlots);
-        vector<vector<uint64_t>> T_diag;
-        vector<vector<uint64_t>> T_sdiag;
-        vector<vector<uint32_t>> item_matrix_mapping;
-        vector<uint64_t> zeroRow(mM, 0);
-        for(size_t i = 0; i < mN; i++) {
-            uint64_t pos = start_pos_spacing[i];
-            uint64_t binidx = pos % mNumSlots;
-            auto matrix_idx = bin_sizes[binidx];
-            bin_sizes[binidx] += 1;
-            if (T_diag.size() < matrix_idx + 1) {
-                T_diag.push_back(zeroRow);
-                T_sdiag.push_back(zeroRow);
-                item_matrix_mapping.push_back(vector<uint32_t>(mNumSlots, -1));
+        for (size_t i = 0; i < mNumSlots; i++) {
+            bin_sizes[i] = bins_items[i].size();
+        }
+
+        size_t L = 0;
+        for (const auto& v : bins_items) L = std::max(L, v.size());
+
+        T_diag_flat.assign(L * mM, 0);
+        T_sdiag_flat.assign(L * mM, 0);
+
+        auto* diag = T_diag_flat.data();
+        auto* sdiag = T_sdiag_flat.data();
+        const uint64_t* bands = bands_flat.data();
+
+        for (uint32_t i = 0; i < mN; ++i) {
+            const uint32_t pos = start_pos_spacing[i];
+            const uint32_t row = item_matrix_idx[i];
+            const uint64_t* src = bands + i * mW;
+
+            uint32_t room = (mM - pos + mNumSlots - 1) / mNumSlots;
+            size_t take0 = std::min<uint64_t>(mW, room);
+
+            uint32_t p = pos;
+            for (size_t w = 0; w < take0; ++w, p += mNumSlots) {
+                diag[row * mM + p] = src[w];
             }
-            item_matrix_mapping[matrix_idx][binidx] = i;
-            bool wrap = false;
-            for(size_t w = 0; w < mW; w++){
-                if(pos >= mM) {
-                    pos = pos - mM;
-                    wrap = true;
+
+            if (take0 < mW) {
+                uint32_t p2 = pos + take0 * mNumSlots - mM;
+                for (size_t w = take0; w < mW; ++w, p2 += mNumSlots) {
+                    sdiag[row * mM + p2] = src[w];
                 }
-                if (!wrap) T_diag[matrix_idx][pos] = bands_flat[i*mW+w];
-                else T_sdiag[matrix_idx][pos] = bands_flat[i*mW+w];
-                pos += mNumSlots;
             }
         }
-        auto L = T_diag.size();
 
         ot_idx.resize(mN);
-        auto idx = 0;
-        for (size_t i = 0; i < L; i++) {
-            for (size_t j = 0; j < mNumSlots; j++) {
-                if (item_matrix_mapping[i][j] != -1) {
-                    ot_idx[idx++] = item_matrix_mapping[i][j];
-                }
+        size_t idx = 0;
+        for (size_t mat = 0; mat < L; ++mat) {
+            for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+                const auto& vec = bins_items[bin];
+                if (mat < vec.size())
+                    ot_idx[idx++] = vec[mat];
             }
         }
         setTimePoint("Sender::Sequencing");
@@ -147,19 +175,16 @@ namespace rlweOkvs
         vector<uint64_t> plainVec(mNumSlots);
         ptxts_diag.resize(mNumBatch*L);
         ptxts_sdiag.resize(mNumBatch*L);
-        
+    
         size_t outIdx = 0;
-
-        for(uint64_t i = 0; i < L; i++){
-            for(uint32_t j = 0 ; j < mNumBatch; j++){
-                const size_t offset = j * mNumSlots;
-                for(uint64_t k = 0; k < mNumSlots; k++){
-                    plainVec[k] = T_diag[i][offset+k];
-                }
+#pragma GCC unroll 16
+        for (size_t i = 0; i < L; ++i) {
+            const size_t row_base = i * mM;
+            for (uint32_t j = 0; j < mNumBatch; ++j) {
+                const size_t off = row_base + j * mNumSlots;
+                std::copy_n(&T_diag_flat[off], mNumSlots, plainVec.data());
                 mBatchEncoder->encode(plainVec, ptxts_diag[outIdx]);
-                for(uint64_t k = 0; k < mNumSlots; k++){
-                    plainVec[k] = T_sdiag[i][offset+k];
-                }
+                std::copy_n(&T_sdiag_flat[off], mNumSlots, plainVec.data());
                 mBatchEncoder->encode(plainVec, ptxts_sdiag[outIdx++]);
             }
         }
@@ -177,6 +202,7 @@ namespace rlweOkvs
 
         decoded_in_he.resize(L);
 
+#pragma GCC unroll 16
         for (size_t i = 0; i < L; ++i) {
             bool initialized = false;
             Ciphertext tmp;

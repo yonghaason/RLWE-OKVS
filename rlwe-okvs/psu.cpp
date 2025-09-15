@@ -31,6 +31,8 @@ namespace rlweOkvs
 
         vector<uint32_t> ot_idx;
         co_await rpmtSender.run(FY, ot_idx, chl);
+
+        auto comm = chl.bytesSent() + chl.bytesReceived();
         
         SilentOtExtSender otSender;
         vector<array<block, 2>> sendMsgs(mN);
@@ -39,6 +41,9 @@ namespace rlweOkvs
             sendMsgs[i][0] = Y[ot_idx[i]];
         }
         co_await otSender.sendChosen(sendMsgs, mPrng, chl);
+
+        comm = chl.bytesSent() + chl.bytesReceived() - comm;
+        cout << "FinalOT takes " << comm << " bytes" << endl;
 
         setTimePoint("Sender::Final OT");
     };
@@ -51,11 +56,20 @@ namespace rlweOkvs
         auto m = static_cast<size_t>((1.1 * mNreceiver));
         block Delta;
 
+        auto comm = chl.bytesSent() + chl.bytesReceived();
+
         SilentVoleSender<block, block, oc::CoeffCtxGF128> voleSender;
         co_await voleSender.silentSendInplace(Delta, m, mPrng, chl);
 
+        comm = chl.bytesSent() + chl.bytesReceived() - comm;
+        cout << "VOLE takes " << comm << " bytes" << endl;
+
         vector<block> pp;
         co_await chl.recvResize(pp);
+
+        cout << "Sender receives OPRF ("
+             << pp.size() * sizeof(block) << " Bytes)" << endl;
+
 
         band_okvs::BandOkvs okvs;        
         auto band_length = 196;

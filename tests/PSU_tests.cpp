@@ -170,5 +170,10 @@ void psu_protocol_test(const oc::CLP& cmd)
         cout << endl;
         cout << timer_s << endl;
         cout << timer_r << endl;
-    } 
+
+        std::cout << "comm " << double(socket[0].bytesSent())/ 1024 / 1024 << " + "
+              << double(socket[1].bytesSent())/ 1024 / 1024 << " = "
+              << double(socket[0].bytesSent() + socket[1].bytesSent()) / 1024 / 1024
+              << "MB" << std::endl;
+    }
 }
