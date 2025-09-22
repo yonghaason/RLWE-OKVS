@@ -1,7 +1,8 @@
-#include "rpmt.h"
+#include "sspmt.h"
 #include "okvs.h"
 #include "seal/util/uintarithsmallmod.h"
 #include "seal/util/numth.h"
+#include "../GMW/Gmw.h"
 #include <memory>
 
 #include <set>
@@ -9,10 +10,11 @@
 using namespace std;
 using namespace seal;
 using namespace oc;
+using namespace volePSI;
 
 namespace rlweOkvs 
 {
-    void RpmtSender::init(uint32_t n, uint32_t nReceiver, uint32_t logp, uint64_t numSlots)
+    void SspmtSender::init(uint32_t n, uint32_t nReceiver, uint32_t logp, uint64_t numSlots)
     {
         EncryptionParameters parms(scheme_type::bgv);
         mNumSlots = numSlots;
@@ -23,6 +25,7 @@ namespace rlweOkvs
         mM = (ceil((1.16 * n) / mNumSlots) + 1) * mNumSlots;
         mW = 134; // 1.16 ; security paraemter = 40
         mNumBatch = mM / mNumSlots;
+        mPrng.SetSeed(oc::AllOneBlock);
         
         parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, { 40, 40, 58, 50}));
         mModulus = PlainModulus::Batching(mNumSlots, logp);
@@ -33,15 +36,13 @@ namespace rlweOkvs
         mEvaluator = make_unique<Evaluator>(*mContext);
     };
 
-    Proto RpmtSender::run(
+    Proto SspmtSender::run(
         const std::vector<oc::block> &Y, 
-        std::vector<uint32_t> &ot_idx,
         Socket &chl)
     {
         vector<Plaintext> ptxts_diag;
         vector<Plaintext> ptxts_sdiag;
-        vector<uint32_t> bin_sizes;
-        preprocess(Y, ptxts_diag, ptxts_sdiag, bin_sizes, ot_idx);
+        preprocess(Y, ptxts_diag, ptxts_sdiag);
 
         SEALContext context = *mContext;
 
@@ -71,7 +72,7 @@ namespace rlweOkvs
         stringstream sendstream;
         for (size_t i = 0; i < decoded_in_he.size(); i++) {
             auto byte = decoded_in_he[i].save(sendstream);
-            if (i == 0) cout << "result ctxt in bytes: " << byte << endl;
+            // if (i == 0) cout << "result ctxt in bytes: " << byte << endl;
         }
 
         cout << "Sender sends " << decoded_in_he.size() << " decoded ctxts, "
@@ -83,12 +84,41 @@ namespace rlweOkvs
         setTimePoint("Sender::Serialize & Send");        
     }
 
-    void RpmtSender::preprocess(
+    Proto SspmtSender::run(
+        const std::vector<oc::block> &Y, 
+        oc::BitVector &results,
+        Socket &chl)
+    {
+        assert(!mRpmt && "Sender obtains result only when ssPMT.");
+        co_await run(Y, chl);
+
+        // GMW with maskings
+        u64 keyBitLength = 40 + oc::log2ceil(Y.size());
+        u64 keyByteLength = oc::divCeil(keyBitLength, 8);
+
+        oc::Matrix<u8> gmwin;
+        gmwin.resize(Y.size(), keyByteLength, oc::AllocType::Uninitialized);
+        for (size_t i = 0; i < Y.size(); i++) {
+            memcpy(&gmwin(i, 0), &maskings[i], keyByteLength);
+        }
+        
+        Gmw gmw;
+        gmw.setTimer(getTimer());
+        auto cir = isZeroCircuit(keyBitLength);
+        gmw.init(Y.size(), cir, 1, mOTeBatchSize, 0, mPrng.get());
+        gmw.setInput(0, gmwin);
+
+        co_await gmw.run(chl);
+        auto rr = gmw.getOutputView(0);
+        results.resize(Y.size());
+        std::copy(rr.begin(), rr.end(), results.data());
+        setTimePoint("Sender::Online GMW");
+    }
+
+    void SspmtSender::preprocess(
         const std::vector<oc::block> &Y,
         std::vector<seal::Plaintext> &ptxts_diag,
-        std::vector<seal::Plaintext> &ptxts_sdiag,
-        std::vector<uint32_t> &bin_sizes,
-        std::vector<uint32_t> &ot_idx)
+        std::vector<seal::Plaintext> &ptxts_sdiag)
     {
         PrimeFieldOkvs okvs;
         // okvs.setTimer(getTimer());
@@ -112,7 +142,6 @@ namespace rlweOkvs
         std::vector<uint64_t> T_sdiag_flat;   // L * mM
         
         std::vector<std::vector<uint32_t>> bins_items(mNumSlots);
-        bins_items.reserve(mNumSlots);
         std::vector<uint32_t> item_binidx(mN);
         std::vector<uint32_t> item_matrix_idx(mN);
 
@@ -159,17 +188,37 @@ namespace rlweOkvs
                 }
             }
         }
-
+        
         ot_idx.resize(mN);
         size_t idx = 0;
-        for (size_t mat = 0; mat < L; ++mat) {
-            for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
-                const auto& vec = bins_items[bin];
-                if (mat < vec.size())
-                    ot_idx[idx++] = vec[mat];
+
+        if (mRpmt) {
+            for (size_t mat = 0; mat < L; ++mat) {
+                for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+                    const auto& vec = bins_items[bin];
+                    if (mat < vec.size())
+                        ot_idx[idx++] = vec[mat];
+                }
             }
         }
-        setTimePoint("Sender::Sequencing");
+        else {
+            maskings.resize(mN);
+            ptxts_mask.resize(L);
+            vector<vector<uint64_t>> raw_masks(L);            
+            for (size_t mat = 0; mat < L; mat++) {
+                raw_masks[mat].resize(mNumSlots);
+                mPrng.get<uint64_t>(raw_masks[mat]);
+                for (uint32_t bin = 0; bin < mNumSlots; bin++) {
+                    raw_masks[mat][bin] = seal::util::barrett_reduce_64(raw_masks[mat][bin], mModulus);
+                    const auto& vec = bins_items[bin];
+                    if (mat < vec.size()) {
+                        ot_idx[idx] = vec[mat];
+                        maskings[idx++] = raw_masks[mat][bin];
+                    }
+                }
+                mBatchEncoder->encode(raw_masks[mat], ptxts_mask[mat]);
+            }
+        }
 
         //Batch  
         vector<uint64_t> plainVec(mNumSlots);
@@ -177,7 +226,6 @@ namespace rlweOkvs
         ptxts_sdiag.resize(mNumBatch*L);
     
         size_t outIdx = 0;
-#pragma GCC unroll 16
         for (size_t i = 0; i < L; ++i) {
             const size_t row_base = i * mM;
             for (uint32_t j = 0; j < mNumBatch; ++j) {
@@ -188,10 +236,10 @@ namespace rlweOkvs
                 mBatchEncoder->encode(plainVec, ptxts_sdiag[outIdx++]);
             }
         }
-        setTimePoint("Sender::BatchEncode");
+        setTimePoint("Sender::Sequencing & HE Encode");
     }
 
-    void RpmtSender::encrypted_decode(
+    void SspmtSender::encrypted_decode(
         const std::vector<seal::Ciphertext> &encoded_in_he,
         const std::vector<seal::Ciphertext> &encoded_in_he_shift,
         const std::vector<seal::Plaintext> &ptxts_diag,
@@ -235,13 +283,20 @@ namespace rlweOkvs
                 }
             }
         }
+
+        if (!mRpmt) {
+            for (size_t i = 0; i < L; ++i) {
+                mEvaluator->add_plain_inplace(decoded_in_he[i], ptxts_mask[i]);
+            }
+        }
+
         for (size_t i = 0; i < decoded_in_he.size(); i++) {
             mEvaluator->mod_switch_to_next_inplace(decoded_in_he[i]);
         }
         setTimePoint("Sender::Encrypted OKVS Decoding");
     }
 
-    void RpmtReceiver::init(uint32_t n, uint32_t nSender, uint32_t logp, uint64_t numSlots)
+    void SspmtReceiver::init(uint32_t n, uint32_t nSender, uint32_t logp, uint64_t numSlots)
     {
         EncryptionParameters parms(scheme_type::bgv);
         mNumSlots = numSlots;
@@ -252,7 +307,7 @@ namespace rlweOkvs
         mM = (ceil((1.16 * n) / mNumSlots) + 1) * mNumSlots;
         mW = 134; 
         mNumBatch = mM / mNumSlots;
-        mPrng.SetSeed(oc::toBlock(0xDEADBEEF12345678ull, 0xBADC0FFEE0DDF00Dull));
+        mPrng.SetSeed(oc::ZeroBlock);
         
         parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, { 40, 40, 58, 50}));
         mModulus = PlainModulus::Batching(mNumSlots, logp);
@@ -271,7 +326,7 @@ namespace rlweOkvs
         mDecryptor = make_unique<Decryptor>(*mContext, secret_key);
     };
 
-    Proto RpmtReceiver::run(
+    Proto SspmtReceiver::run(
         const std::vector<oc::block> &X, 
         oc::BitVector &results,
         Socket &chl)
@@ -282,7 +337,6 @@ namespace rlweOkvs
         setTimePoint("Receiver::Serialize & Send");
         
         size_t decoded_he_size;
-        vector<uint32_t> bin_sizes;
         string recvstring;
         co_await chl.recv(decoded_he_size);
         co_await chl.recvResize(recvstring);
@@ -298,67 +352,100 @@ namespace rlweOkvs
             decoded_in_he[i].unsafe_load(context, recvstream);
         }
 
-        decrypt(decoded_in_he, bin_sizes, results);
+        vector<uint64_t> dec_results;
+        decrypt(decoded_in_he, dec_results);
+
+        if (mRpmt) {
+            results.resize(mNsender);
+            for(size_t i = 0; i < mNsender; i++){
+                results[i] = (dec_results[i] == mIndicatorStr) ? 1 : 0;
+            }
+        }
+        else {
+            // GMW with dec_results
+            u64 keyBitLength = 40 + oc::log2ceil(mNsender);
+            u64 keyByteLength = oc::divCeil(keyBitLength, 8);
+
+            oc::Matrix<u8> gmwin;
+            
+            gmwin.resize(mNsender, keyByteLength, oc::AllocType::Uninitialized);
+            for (size_t i = 0; i < mNsender; i++) {
+                auto tmp = util::sub_uint_mod(dec_results[i], mIndicatorStr, mModulus);
+                memcpy(&gmwin(i, 0), &tmp, keyByteLength);
+            }
+            
+            Gmw gmw;
+            gmw.setTimer(getTimer());
+            auto cir = isZeroCircuit(keyBitLength);
+            gmw.init(mNsender, cir, 1, mOTeBatchSize, 1, mPrng.get());
+            gmw.setInput(0, gmwin);
+
+            co_await gmw.run(chl);
+            auto rr = gmw.getOutputView(0);
+            results.resize(mNsender);
+            std::copy(rr.begin(), rr.end(), results.data());
+            setTimePoint("Receiver::Online GMW");
+        }
     }
 
-    void RpmtReceiver::encode_and_encrypt_noserialize(
-        const std::vector<oc::block> &X, 
-        std::vector<Ciphertext> &ctxts,
-        std::vector<Ciphertext> &ctxts_shift
-    )
-    {
-        mIndicatorStr = seal::util::barrett_reduce_64(mPrng.get<uint64_t>(), mModulus);
-        vector<uint64_t> val(mN, mIndicatorStr);
+    // void SspmtReceiver::encode_and_encrypt_noserialize(
+    //     const std::vector<oc::block> &X, 
+    //     std::vector<Ciphertext> &ctxts,
+    //     std::vector<Ciphertext> &ctxts_shift
+    // )
+    // {
+    //     mIndicatorStr = seal::util::barrett_reduce_64(mPrng.get<uint64_t>(), mModulus);
+    //     vector<uint64_t> val(mN, mIndicatorStr);
 
-        PrimeFieldOkvs okvs;
-        // okvs.setTimer(getTimer());
-        okvs.init(X.size(), mM, mW, mModulus);
+    //     PrimeFieldOkvs okvs;
+    //     // okvs.setTimer(getTimer());
+    //     okvs.init(X.size(), mM, mW, mModulus);
 
-        vector<uint64_t> encoded(mM);
+    //     vector<uint64_t> encoded(mM);
 
-        if (!okvs.encode(X, val, encoded)) throw RTE_LOC;        
+    //     if (!okvs.encode(X, val, encoded)) throw RTE_LOC;        
 
-        vector<uint64_t> encoded_spacing(mM);
-        for (uint32_t i = 0; i < encoded.size(); i++) {
-            uint32_t q = i / mNumSlots;
-            uint32_t r = i % mNumSlots;
-            encoded_spacing[i] = encoded[r * mNumBatch + q];
-        }
-        encoded = encoded_spacing;
+    //     vector<uint64_t> encoded_spacing(mM);
+    //     for (uint32_t i = 0; i < encoded.size(); i++) {
+    //         uint32_t q = i / mNumSlots;
+    //         uint32_t r = i % mNumSlots;
+    //         encoded_spacing[i] = encoded[r * mNumBatch + q];
+    //     }
+    //     encoded = encoded_spacing;
 
-        setTimePoint("Receiver::OKVS Encoding");
+    //     setTimePoint("Receiver::OKVS Encoding");
 
-        ctxts.resize(static_cast<size_t>(mNumBatch));
-        ctxts_shift.resize(static_cast<size_t>(mNumBatch));
-        vector<uint64_t> plainVec(mNumSlots);
-        Plaintext ptxt;
+    //     ctxts.resize(static_cast<size_t>(mNumBatch));
+    //     ctxts_shift.resize(static_cast<size_t>(mNumBatch));
+    //     vector<uint64_t> plainVec(mNumSlots);
+    //     Plaintext ptxt;
         
-        // TODO: Maybe accelerated with vector iterators
-        for (uint32_t i = 0; i < mNumBatch; i++) {
-            for (uint64_t j = 0 ; j < mNumSlots; j++) {
-                plainVec[j] = encoded[i*mNumSlots + j];
-            }
-            mBatchEncoder->encode(plainVec, ptxt);
-            mEncryptor->encrypt_symmetric(ptxt, ctxts[i]);
-        }
+    //     // TODO: Maybe accelerated with vector iterators
+    //     for (uint32_t i = 0; i < mNumBatch; i++) {
+    //         for (uint64_t j = 0 ; j < mNumSlots; j++) {
+    //             plainVec[j] = encoded[i*mNumSlots + j];
+    //         }
+    //         mBatchEncoder->encode(plainVec, ptxt);
+    //         mEncryptor->encrypt_symmetric(ptxt, ctxts[i]);
+    //     }
 
-        for (uint32_t i = 0; i < mNumBatch - 1; i++) {
-            for (uint64_t j = 0 ; j < mNumSlots; j++) {
-                plainVec[j] = encoded[i*mNumSlots + j + 1];
-            }
-            mBatchEncoder->encode(plainVec, ptxt);
-            mEncryptor->encrypt_symmetric(ptxt, ctxts_shift[i]);
-        }
-        for (uint64_t j = 0 ; j < mNumSlots-1; j++) {
-            plainVec[j] = encoded[(mNumBatch-1)*mNumSlots + j + 1];
-        }
-        plainVec[mNumSlots-1] = encoded[0];
-        mBatchEncoder->encode(plainVec, ptxt);
-        mEncryptor->encrypt_symmetric(ptxt, ctxts_shift[mNumBatch - 1]);
-        setTimePoint("Receiver::Encryption");
-    }
+    //     for (uint32_t i = 0; i < mNumBatch - 1; i++) {
+    //         for (uint64_t j = 0 ; j < mNumSlots; j++) {
+    //             plainVec[j] = encoded[i*mNumSlots + j + 1];
+    //         }
+    //         mBatchEncoder->encode(plainVec, ptxt);
+    //         mEncryptor->encrypt_symmetric(ptxt, ctxts_shift[i]);
+    //     }
+    //     for (uint64_t j = 0 ; j < mNumSlots-1; j++) {
+    //         plainVec[j] = encoded[(mNumBatch-1)*mNumSlots + j + 1];
+    //     }
+    //     plainVec[mNumSlots-1] = encoded[0];
+    //     mBatchEncoder->encode(plainVec, ptxt);
+    //     mEncryptor->encrypt_symmetric(ptxt, ctxts_shift[mNumBatch - 1]);
+    //     setTimePoint("Receiver::Encryption");
+    // }
 
-    void RpmtReceiver::encode_and_encrypt(
+    void SspmtReceiver::encode_and_encrypt(
             const std::vector<oc::block> &X, 
             stringstream &ctxtstream)
     {
@@ -393,7 +480,7 @@ namespace rlweOkvs
             }
             mBatchEncoder->encode(plainVec, ptxt);
             auto byte = mEncryptor->encrypt_symmetric(ptxt).save(ctxtstream);
-            if (i == 0) cout << "encryption in byte: " << byte << endl;
+            // if (i == 0) cout << "encryption in byte: " << byte << endl;
         }
 
         for (uint32_t i = 0; i < mNumBatch - 1; i++) {
@@ -412,10 +499,9 @@ namespace rlweOkvs
         setTimePoint("Receiver::Encryption");
     }
 
-    void RpmtReceiver::decrypt(
-        const std::vector<seal::Ciphertext> &decoded_in_he, 
-        const std::vector<uint32_t> &bin_sizes,
-        oc::BitVector &results)
+    void SspmtReceiver::decrypt(
+        const std::vector<seal::Ciphertext> &decoded_in_he,
+        std::vector<uint64_t> &dec_results)
     {
         const size_t L = decoded_in_he.size();
         vector<Plaintext> ptxts(L);
@@ -427,19 +513,18 @@ namespace rlweOkvs
             mDecryptor->decrypt(decoded_in_he[i], ptxts[i]);
         }
 
-        results.resize(mNsender);
-        vector<vector<uint64_t>> decodeVec(L, vector<uint64_t>(mNumSlots, 0));
+        dec_results.resize(mNsender);
+        vector<uint64_t> decodeVec(mNumSlots);
 
         auto idx = 0;
         for(size_t i = 0; i < L; i++){
-            mBatchEncoder->decode(ptxts[i], decodeVec[i]);
+            mBatchEncoder->decode(ptxts[i], decodeVec);
             for(size_t j = 0; j < mNumSlots; j++) {
                 if (i < bin_sizes[j]) {
-                    results[idx++] = (decodeVec[i][j] == mIndicatorStr) ? 1 : 0;
+                    dec_results[idx++] = decodeVec[j];
                 }
             }
         }
         setTimePoint("Receiver::Decrypt");
-    }
-            
+    }            
 }

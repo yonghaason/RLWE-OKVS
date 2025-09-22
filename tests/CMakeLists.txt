@@ -3,6 +3,7 @@ set(SRCS
     SEAL_tests.cpp
     RPMT_tests.cpp
     PSU_tests.cpp
+    GMW_tests.cpp
     UnitTests.cpp
 )
 

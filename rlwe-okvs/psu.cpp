@@ -1,5 +1,5 @@
 #include "psu.h"
-#include "rlwe-okvs/rpmt.h"
+#include "rlwe-okvs/sspmt.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "libOTe/Vole/Silent/SilentVoleReceiver.h"
@@ -23,27 +23,28 @@ namespace rlweOkvs
         vector<block> FY;
         co_await oprf(Y, FY, chl);
         
-        RpmtSender rpmtSender;
+        SspmtSender sspmtSender;
         uint32_t logp = 60;
         uint32_t numSlots = 1 << 13;
-        rpmtSender.init(mN, mNreceiver, logp, numSlots);
-        rpmtSender.setTimer(getTimer());
+        sspmtSender.init(mN, mNreceiver, logp, numSlots);
+        sspmtSender.setTimer(getTimer());
 
-        vector<uint32_t> ot_idx;
-        co_await rpmtSender.run(FY, ot_idx, chl);
-
+        BitVector sspmt;
+        co_await sspmtSender.run(FY, sspmt, chl);
+        auto ot_idx = sspmtSender.get_ot_idx();
+        
         auto comm = chl.bytesSent() + chl.bytesReceived();
         
         SilentOtExtSender otSender;
         vector<array<block, 2>> sendMsgs(mN);
         for (size_t i = 0; i < mN; i++) {
-            sendMsgs[i][1] = oc::AllOneBlock;
-            sendMsgs[i][0] = Y[ot_idx[i]];
+            sendMsgs[i][!sspmt[i]] = oc::AllOneBlock;
+            sendMsgs[i][sspmt[i]] = Y[ot_idx[i]];
         }
         co_await otSender.sendChosen(sendMsgs, mPrng, chl);
 
         comm = chl.bytesSent() + chl.bytesReceived() - comm;
-        cout << "FinalOT takes " << comm << " bytes" << endl;
+        // cout << "FinalOT takes " << comm << " bytes" << endl;
 
         setTimePoint("Sender::Final OT");
     };
@@ -62,13 +63,13 @@ namespace rlweOkvs
         co_await voleSender.silentSendInplace(Delta, m, mPrng, chl);
 
         comm = chl.bytesSent() + chl.bytesReceived() - comm;
-        cout << "VOLE takes " << comm << " bytes" << endl;
+        // cout << "VOLE takes " << comm << " bytes" << endl;
 
         vector<block> pp;
         co_await chl.recvResize(pp);
 
-        cout << "Sender receives OPRF ("
-             << pp.size() * sizeof(block) << " Bytes)" << endl;
+        // cout << "Sender receives OPRF ("
+        //      << pp.size() * sizeof(block) << " Bytes)" << endl;
 
 
         band_okvs::BandOkvs okvs;        
@@ -104,18 +105,18 @@ namespace rlweOkvs
         vector<block> FX;
         co_await oprf(X, FX, chl);        
                 
-        RpmtReceiver rpmtReceiver;
+        SspmtReceiver sspmtReceiver;
         uint32_t logp = 60;
         uint32_t numSlots = 1 << 13;
-        rpmtReceiver.init(mN, mNsender, logp, numSlots);
-        rpmtReceiver.setTimer(getTimer());
+        sspmtReceiver.init(mN, mNsender, logp, numSlots);
+        sspmtReceiver.setTimer(getTimer());
 
-        BitVector rpmt;
-        co_await rpmtReceiver.run(FX, rpmt, chl);
+        BitVector sspmt;
+        co_await sspmtReceiver.run(FX, sspmt, chl);
 
         SilentOtExtReceiver otReceiver;
         vector<block> recvMsgs(mNsender);
-        co_await otReceiver.receiveChosen(rpmt, recvMsgs, mPrng, chl);
+        co_await otReceiver.receiveChosen(sspmt, recvMsgs, mPrng, chl);
 
         for (size_t i = 0; i < recvMsgs.size(); i++) {
             if (recvMsgs[i] != oc::AllOneBlock) {

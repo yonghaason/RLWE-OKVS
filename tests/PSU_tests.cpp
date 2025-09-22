@@ -156,7 +156,8 @@ void psu_protocol_test(const oc::CLP& cmd)
         if (setX.find(y) != setX.end()) ++real;
 
     if (D.size() != n - real) {
-        cout << "Size different" << endl;
+        cout << "Size different: " 
+        << D.size() << " (proto) v.s. " << n - real << " (real)"  << endl;
         throw RTE_LOC; 
     }
 
