@@ -6,7 +6,6 @@
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Network/Channel.h"
 #include "coproto/coproto.h"
-#include "rlwe-okvs/sspmt.h"
 
 #include "seal/seal.h"
 
@@ -15,46 +14,41 @@ namespace rlweOkvs
     using Proto = coproto::task<>;
     using Socket = coproto::Socket;
 
-    class PsuSender: public oc::TimerAdapter
+    class OprfSender: public oc::TimerAdapter
     {
         uint32_t mN;
         uint32_t mNreceiver;
-        oc::PRNG mPrng;        
-        sspmtParams mSsParams;
+        oc::PRNG mPrng;
 
     public:
-        void init(uint32_t n, uint32_t nReceiver, 
-            sspmtParams ssParams, oc::block seed) {
+        void init(uint32_t n, uint32_t nReceiver, oc::block seed) {
             mN = n;
             mNreceiver = nReceiver;
-            ssParams = mSsParams;
             mPrng.SetSeed(seed);
         };
 
         Proto run(
-            const std::vector<oc::block> &Y, 
+            const std::vector<oc::block> &Y,
+            std::vector<oc::block> &FY,
             Socket &chl);
     };
 
-    class PsuReceiver: public oc::TimerAdapter
+    class OprfReceiver: public oc::TimerAdapter
     {
         uint32_t mN;
         uint32_t mNsender;
         oc::PRNG mPrng;
-        sspmtParams mSsParams;
 
     public:
-        void init(uint32_t n, uint32_t nSender, 
-            sspmtParams ssParams, oc::block seed) {
+        void init(uint32_t n, uint32_t nSender, oc::block seed) {
             mN = n;
             mNsender = nSender;
-            ssParams = mSsParams;
             mPrng.SetSeed(seed);
         };
 
         Proto run(
-            const std::vector<oc::block> &X, 
-            std::vector<oc::block>& D, 
+            const std::vector<oc::block> &X,
+            std::vector<oc::block> &FX,
             Socket &chl);
     };
 };

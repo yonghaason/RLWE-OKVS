@@ -55,7 +55,7 @@ void Gmw_iszero_test(const oc::CLP& cmd)
     gmw1.init(n, cir, 1, bs, 1, oc::OneBlock);
 
     gmw0.setInput(0, in0);
-    gmw1.implSetInput(0, in1, in1.cols());
+    gmw1.setInput(0, in1);
 
     auto p0 = gmw0.run(sockets[0]); 
     auto p1 = gmw1.run(sockets[1]);
@@ -96,6 +96,11 @@ void Gmw_iszero_test(const oc::CLP& cmd)
     if (cmd.isSet("v")) {
         std::cout << timer1 << std::endl;
         std::cout << timer2 << std::endl;
-        std::cout << (double) sockets[0].bytesReceived() / 1024/1024 << " " << (double) sockets[0].bytesSent() / 1024/1024 << " MB " << std::endl;
+        double recvByte = sockets[0].bytesReceived();
+        double sentByte = sockets[0].bytesSent();
+        std::cout 
+        << recvByte/1024.0/1024.0 << " + "  << sentByte/1024.0/1024.0 
+        << " = " << (recvByte + sentByte)/1024.0/1024.0 << " MB " 
+        << std::endl;
     }
 }

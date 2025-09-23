@@ -17,6 +17,16 @@ namespace rlweOkvs
 {
     using Proto = coproto::task<>;
     using Socket = coproto::Socket;
+    
+    // TODO: Predefine sspmt params in another header,
+    // choose among them according to input size only.
+    struct sspmtParams {
+        u32 heNumSlots = 1 << 13;
+        std::vector<int> heCoeffModulus = {40, 40, 58, 50};
+        u32 hePlainModulusBits = 60;
+        u32 bandWidth = 134;
+        double bandExpansion = 1.16;        
+    };
 
     class SspmtSender: public oc::TimerAdapter
     {
@@ -27,24 +37,23 @@ namespace rlweOkvs
         unique_ptr<BatchEncoder> mBatchEncoder;
         shared_ptr<SEALContext> mContext;
         
-        uint32_t mN;
-        uint32_t mM;
-        uint32_t mW; 
-        uint32_t mNumBatch;
-
-        uint32_t mNreceiver;
+        uint32_t mN, mNreceiver, mM, mW, mNumBatch, mWrap;
 
         std::vector<uint32_t> ot_idx;
         std::vector<uint64_t> maskings;
         std::vector<seal::Plaintext> ptxts_mask;
         std::vector<uint32_t> bin_sizes;
 
+        std::vector<std::vector<seal::Plaintext>> ptxts_diags;
+
         bool mRpmt = false;
         uint64_t mOTeBatchSize = 1ull << 19;
         
     public:
 
-        void init(uint32_t n, uint32_t nReceiver, uint32_t logp, uint64_t numSlots);
+        void init(
+            uint32_t n, uint32_t nReceiver, 
+            sspmtParams ssParams, oc::block seed = oc::OneBlock);
 
         void rpmt_on() {mRpmt = true;};
         auto get_ot_idx() {return ot_idx;};
@@ -59,15 +68,10 @@ namespace rlweOkvs
             Socket &chl);
 
         void preprocess(
-            const std::vector<oc::block> &Y,
-            std::vector<seal::Plaintext> &ptxts_diag,
-            std::vector<seal::Plaintext> &ptxts_sdiag);
+            const std::vector<oc::block> &Y);
 
         void encrypted_decode(
-            const std::vector<seal::Ciphertext> &encoded_in_he,
-            const std::vector<seal::Ciphertext> &encoded_in_he_shift,
-            const std::vector<seal::Plaintext> &ptxts_diag,
-            const std::vector<seal::Plaintext> &ptxts_sdiag,
+            const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
             std::vector<seal::Ciphertext> &decoded_in_he);
     };
 
@@ -81,13 +85,9 @@ namespace rlweOkvs
         unique_ptr<BatchEncoder> mBatchEncoder;
         unique_ptr<Decryptor> mDecryptor;
         
-        uint32_t mN;
-        uint32_t mM;
-        uint32_t mW; 
-        uint32_t mNumBatch;
+        uint32_t mN, mNsender, mM, mW, mNumBatch, mWrap;
 
         uint64_t mIndicatorStr;
-        uint64_t mNsender;
 
         std::vector<uint32_t> bin_sizes;
 
@@ -96,7 +96,9 @@ namespace rlweOkvs
         
     public:
 
-        void init(uint32_t n, uint32_t nSender, uint32_t logp, uint64_t numSlots);
+        void init(
+            uint32_t n, uint32_t nSender, 
+            sspmtParams ssParams, oc::block seed = oc::ZeroBlock);
 
         void rpmt_on() {mRpmt = true;};
 
@@ -107,16 +109,10 @@ namespace rlweOkvs
 
         void encode_and_encrypt(
             const std::vector<oc::block> &X, 
-            stringstream &ctxtstream);
+            stringstream &ctxtstream);    
 
         void decrypt(
             const std::vector<seal::Ciphertext> &decoded_in_he, 
             std::vector<uint64_t> &dec_results);        
-
-        // void encode_and_encrypt_noserialize(
-        //     const std::vector<oc::block> &X, 
-        //     std::vector<seal::Ciphertext> &ctxts,
-        //     std::vector<seal::Ciphertext> &ctxts_shift);
-
     };
 }

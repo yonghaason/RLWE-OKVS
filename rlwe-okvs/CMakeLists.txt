@@ -3,6 +3,7 @@ set(SRCS
     "rlwe-okvs/sspmt.cpp"
     "band_okvs/band_okvs.cc"
     "band_okvs/band.cc"
+    "band_okvs/oprf.cpp"
     "GMW/Circuit.cpp"
     "GMW/Gmw.cpp"
     "GMW/SilentTripleGen.cpp"
