@@ -140,7 +140,9 @@ void width_test(const oc::CLP& cmd)
              << trials_total; 
     const std::string fname = fname_os.str();
 
-    u32 m = ceil(m_ratio*n);
+    u32 m = ceil(m_ratio*n/8192)*8192;  // t_s = 2^13 
+
+    cout << "m : " << m << endl;
 
     bool file_exists = std::filesystem::exists(fname);
 
