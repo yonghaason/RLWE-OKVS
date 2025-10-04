@@ -25,8 +25,10 @@ namespace rlweOkvs
         std::vector<int> heCoeffModulus = {40, 40, 58, 50};
         u32 hePlainModulusBits = 60;
         u32 bandWidth = 134;
-        double bandExpansion = 1.16;        
+        double bandExpansion = 1.16;
     };
+
+
 
     class SspmtSender: public oc::TimerAdapter
     {

@@ -10,6 +10,9 @@
 
 #include "seal/seal.h"
 
+int psu(int n, int t_s, int m,  vector<int> vector);
+
+
 namespace rlweOkvs
 {
     using Proto = coproto::task<>;
@@ -27,7 +30,7 @@ namespace rlweOkvs
             sspmtParams ssParams, oc::block seed) {
             mN = n;
             mNreceiver = nReceiver;
-            ssParams = mSsParams;
+            mSsParams = ssParams;
             mPrng.SetSeed(seed);
         };
 
@@ -48,7 +51,7 @@ namespace rlweOkvs
             sspmtParams ssParams, oc::block seed) {
             mN = n;
             mNsender = nSender;
-            ssParams = mSsParams;
+            mSsParams = ssParams;
             mPrng.SetSeed(seed);
         };
 

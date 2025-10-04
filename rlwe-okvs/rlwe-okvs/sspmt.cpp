@@ -29,6 +29,8 @@ namespace rlweOkvs
         mNumBatch = mM / mNumSlots;
         mWrap = divCeil(mW * mNumSlots, mM) + 1;
         mPrng.SetSeed(seed);        
+
+        cout << mW << ", " << mWrap << endl;
         
         parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
         mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);

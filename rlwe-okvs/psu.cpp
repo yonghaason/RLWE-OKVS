@@ -27,6 +27,7 @@ namespace rlweOkvs
         co_await oprfSender.run(Y, FY, chl);    
                 
         SspmtSender sspmtSender;
+        std::cout << "in run: " << mSsParams.bandWidth << std::endl;
         sspmtSender.init(mN, mNreceiver, mSsParams, mPrng.get());
         sspmtSender.setTimer(getTimer());
 

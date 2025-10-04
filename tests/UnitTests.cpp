@@ -10,6 +10,7 @@
 
 namespace rlweOkvsTests {
     oc::TestCollection Tests([](oc::TestCollection& t) {
+    t.add("OKVS_width_test                  ", width_test),
     t.add("OKVS_encode_test                 ", encode_test),
     t.add("OKVS_decode_test                 ", decode_test),
     t.add("context_consistency_test         ", context_consistency_test),
