@@ -129,18 +129,19 @@ void width_test(const oc::CLP& cmd)
     u32 trials_total = cmd.getOr("trials", 100000);
     u32 w0 = cmd.getOr("w0", 0);
     u32 w1 = cmd.getOr("w1", 0);
+    u32 t = cmd.getOr("tt", 1);
 
     if (w0 == w1) w1 = w0 + 1;
     if (w1 == 0) w1 = w0 + 1;
 
     std::ostringstream fname_os;
     fname_os << log2ceil(n) << '_' 
-             << std::fixed << std::setprecision(1) << m_ratio << '_' 
+             << std::fixed << std::setprecision(2) << m_ratio << '_' 
              << logp << '_'
              << trials_total; 
     const std::string fname = fname_os.str();
 
-    u32 m = ceil(m_ratio*n/8192)*8192;  // t_s = 2^13 
+    u32 m = roundUpTo(m_ratio*n, 8192);  // t_s = 2^13 
 
     cout << "m : " << m << endl;
 
@@ -167,7 +168,7 @@ void width_test(const oc::CLP& cmd)
 
     oc::PRNG prng0(oc::ZeroBlock);
 
-    for (u32 w = w0; w < w1; w++)
+    for (u32 w = w0; w < w1; w+=t)
     {
         std::cout << "\n[Running n=" << n << ", m=" << m << ", w=" << w << "]\n";
 
