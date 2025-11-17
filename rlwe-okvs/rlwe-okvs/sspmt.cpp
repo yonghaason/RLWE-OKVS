@@ -83,7 +83,7 @@ namespace rlweOkvs
         co_await chl.send(decoded_in_he.size());        
         co_await chl.send(move(sendstream.str()));
         co_await chl.send(move(bin_sizes));
-        setTimePoint("Sender::Serialize & Send");        
+        setTimePoint("Sender::Serialize & Send");    
     }
 
     Proto SspmtSender::run(
@@ -109,8 +109,8 @@ namespace rlweOkvs
         auto cir = isZeroCircuit(keyBitLength);
         gmw.init(Y.size(), cir, 1, mOTeBatchSize, 0, mPrng.get());
         gmw.setInput(0, gmwin);
-
         co_await gmw.run(chl);
+
         auto rr = gmw.getOutputView(0);
         results.resize(Y.size());
         std::copy(rr.begin(), rr.end(), results.data());
@@ -361,8 +361,8 @@ namespace rlweOkvs
             auto cir = isZeroCircuit(keyBitLength);
             gmw.init(mNsender, cir, 1, mOTeBatchSize, 1, mPrng.get());
             gmw.setInput(0, gmwin);
-
             co_await gmw.run(chl);
+
             auto rr = gmw.getOutputView(0);
             results.resize(mNsender);
             std::copy(rr.begin(), rr.end(), results.data());
@@ -422,8 +422,8 @@ namespace rlweOkvs
         const size_t L = decoded_in_he.size();
         vector<Plaintext> ptxts(L);
    
-        // cout << "Noise Budget: " 
-        // << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
+        cout << "Noise Budget: " 
+        << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
 
         for(size_t i = 0; i < L; i++){
             mDecryptor->decrypt(decoded_in_he[i], ptxts[i]);

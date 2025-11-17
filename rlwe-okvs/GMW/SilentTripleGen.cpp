@@ -13,12 +13,13 @@ namespace volePSI
 {
 	void SilentTripleGen::init(u64 n, u64 batchSize, u64 numThreads, Mode mode, block seed)
 	{
-		mBatchSize = batchSize;
+		mBatchSize = batchSize; // 2^19
 
-		u64 numBatchs = (n + mBatchSize - 1) / mBatchSize;
-		mNumPer = oc::roundUpTo((n + numBatchs - 1) / numBatchs, 128);
-
-		mN = numBatchs * mNumPer;
+		u64 numBatchs = oc::divCeil(n, mBatchSize);
+		// mNumPer = oc::roundUpTo(oc::divCeil(n, numBatchs), 128);
+		mNumPer = mBatchSize; 
+		
+		mN = numBatchs * mNumPer; // 2^19 배수
 		mMode = mode;
 		mPrng.SetSeed(seed);
 
@@ -82,7 +83,6 @@ namespace volePSI
 				msgIter += voleCount;
 
 				mOtExtRecver.mBase.mAesMgr.useAES(msg.size()).hashBlocks(msg, msg);
-
 				mRecverOT[i].setBaseCors(msg, choice, baseA, baseC);
 			}
 		}
@@ -114,6 +114,7 @@ namespace volePSI
 
 			auto msgIter = globMsg.begin();
 			for (u64 i = 0; i < mSenderOT.size(); i++) {
+				
 				auto count = mSenderOT[i].baseCount();
 				auto otCount = count.mBaseOtCount;
 				auto voleCount = count.mBaseVoleCount;

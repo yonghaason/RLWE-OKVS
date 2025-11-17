@@ -20,14 +20,21 @@ namespace rlweOkvs
     
     // TODO: Predefine sspmt params in another header,
     // choose among them according to input size only.
+    // struct sspmtParams {
+    //     u32 heNumSlots = 1 << 13;
+    //     std::vector<int> heCoeffModulus = {40, 40, 58, 50};
+    //     u32 hePlainModulusBits = 60;
+    //     u32 bandWidth = 134;
+    //     double bandExpansion = 1.16;
+    // };
+
     struct sspmtParams {
         u32 heNumSlots = 1 << 13;
         std::vector<int> heCoeffModulus = {40, 40, 58, 50};
-        u32 hePlainModulusBits = 60;
-        u32 bandWidth = 134;
-        double bandExpansion = 1.16;
+        u32 hePlainModulusBits = 56;
+        u32 bandWidth = 21;
+        double bandExpansion = 2.8;
     };
-
 
 
     class SspmtSender: public oc::TimerAdapter
@@ -49,7 +56,7 @@ namespace rlweOkvs
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
 
         bool mRpmt = false;
-        uint64_t mOTeBatchSize = 1ull << 19;
+        uint64_t mOTeBatchSize = 1ull << 19; 
         
     public:
 
@@ -94,7 +101,7 @@ namespace rlweOkvs
         std::vector<uint32_t> bin_sizes;
 
         bool mRpmt = false;
-        uint64_t mOTeBatchSize = 1ull << 19;
+        uint64_t mOTeBatchSize = 1ull << 19; //이 변수 고치니까 2^16에서도 됨(원래 19)
         
     public:
 

@@ -1,5 +1,8 @@
 #include "RPMT_tests.h"
 #include "psu.h"
+// #ifdef COPROTO_ENABLE_BOOST
+// #include <coproto/Socket/AsioSocket.h>
+// #endif
 
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/CLP.h"
@@ -20,7 +23,7 @@ using namespace rlweOkvs;
 
 void psu_protocol_test(const oc::CLP& cmd)
 {       
-    u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
+    u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 18));
     u64 nt = cmd.getOr("nt", 1);
     
     PRNG prng;
@@ -59,7 +62,7 @@ void psu_protocol_test(const oc::CLP& cmd)
     auto e1 = pool1.make_work();
     pool1.create_threads(nt);
 
-    // auto socket = coproto::AsioSocket::makePair();
+    //auto socket = coproto::AsioSocket::makePair();
     auto socket = coproto::LocalAsyncSocket::makePair();
     socket[0].setExecutor(pool0);
     socket[1].setExecutor(pool1);
