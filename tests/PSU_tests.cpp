@@ -75,18 +75,23 @@ void psu_protocol_test(const oc::CLP& cmd)
     psuSender.setTimer(timer_s);
     psuReceiver.setTimer(timer_r);
 
-    u64 logp = cmd.getOr("logp", 60);
-    u64 numSlots = cmd.getOr("t_s", 1 << 13);
-    u64 width = cmd.getOr("w", 134);
-    double expansion_ratio = cmd.getOr("mratio", 1.16);
+    // u64 logp = cmd.getOr("logp", 60);
+    // u64 numSlots = cmd.getOr("t_s", 1 << 13);
+    // u64 width = cmd.getOr("w", 134);
+    // double expansion_ratio = cmd.getOr("mratio", 1.16);
 
     sspmtParams ssParams;
-    ssParams.bandExpansion = expansion_ratio;
-    ssParams.bandWidth = width;
-    ssParams.hePlainModulusBits = logp;
-    ssParams.heNumSlots = numSlots;
+    ssParams.initailize(n); // choose among them according to input size only.
 
-    cout << ssParams.bandWidth << endl;
+    // ssParams.bandExpansion = expansion_ratio;
+    // ssParams.bandWidth = width;
+    // ssParams.hePlainModulusBits = logp;
+    // ssParams.heNumSlots = numSlots;
+
+    // cout << ssParams.bandWidth << endl;
+    // cout << ssParams.bandExpansion << endl;
+    // cout << ssParams.hePlainModulusBits << endl;
+    // cout << ssParams.bandWidth << endl;
 
     psuSender.init(n, n, ssParams, prng.get());
     psuReceiver.init(n, n, ssParams, prng.get());

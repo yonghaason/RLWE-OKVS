@@ -30,12 +30,45 @@ namespace rlweOkvs
 
     struct sspmtParams {
         u32 heNumSlots = 1 << 13;
-        std::vector<int> heCoeffModulus = {40, 40, 58, 50};
-        u32 hePlainModulusBits = 56;
-        u32 bandWidth = 21;
-        double bandExpansion = 2.8;
+        std::vector<int> heCoeffModulus;
+        u32 hePlainModulusBits;
+        u32 bandWidth;
+        double bandExpansion;
+        void initailize(int n){
+            switch(n){
+                case (1ull << 16):
+                    heCoeffModulus = {40, 40, 58, 50};
+                    hePlainModulusBits = 60;
+                    bandWidth = 21;
+                    bandExpansion = 2.9;
+                    break;
+                case (1ull << 18):
+                    heCoeffModulus = {40, 40, 58, 50};
+                    hePlainModulusBits = 60;
+                    bandWidth = 73;
+                    bandExpansion = 1.3;
+                    break;
+                case (1ull << 20):
+                    heCoeffModulus = {40, 40, 58, 50};
+                    hePlainModulusBits = 60;
+                    bandWidth = 142;
+                    bandExpansion = 1.15;
+                    break;
+                case (1ull << 22):
+                    heCoeffModulus = {40, 40, 58, 50};
+                    hePlainModulusBits = 60;
+                    bandWidth = 150;
+                    bandExpansion = 1.15;
+                    break;
+                default:
+                    heCoeffModulus = {40, 40, 58, 60};
+                    hePlainModulusBits = 60;
+                    bandWidth = 21;
+                    bandExpansion = 2.9;
+                    break;
+            }
+        }
     };
-
 
     class SspmtSender: public oc::TimerAdapter
     {
