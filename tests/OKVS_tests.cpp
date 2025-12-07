@@ -1,4 +1,4 @@
-#include "OKVS_Tests.h"
+#include "OKVS_tests.h"
 #include "rlwe-okvs/okvs.h"
 #include "seal/util/common.h"
 #include "seal/util/numth.h"
@@ -80,10 +80,7 @@ void decode_test(const oc::CLP& cmd)
     u32 w = cmd.getOr("w", 134);
     u32 m = ceil(cmd.getOr("ratio", 1.16)*n);
     u64 logp = cmd.getOr("logp", 60);
-    //Modulus p(PlainModulus::Batching(8192, logp));
-    Modulus p(2);
-    if (logp != 1)
-        p = Modulus(PlainModulus::Batching(8192, logp));
+    Modulus p = Modulus(PlainModulus::Batching(8192, logp));
 
     oc::Timer timer;
     timer.setTimePoint("start");
@@ -119,7 +116,78 @@ void decode_test(const oc::CLP& cmd)
     for (u64 i = 0; i < decoded.size(); i++) {
         if (value[i] != decoded[i]) cnt++;
     }
-    if (cnt != n/2) throw RTE_LOC;
+    if (cnt != n/2) {
+        cout << cnt << " != " << n/2 << endl;
+        throw RTE_LOC;
+    }
+
+    if (cmd.isSet("v")) {
+        cout << endl;
+        cout << timer << endl;
+    } 
+}
+
+void decode_binary_test(const oc::CLP& cmd)
+{
+    u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
+    u32 w = cmd.getOr("w", 145);
+    u32 m = ceil(cmd.getOr("ratio", 1.15)*n);
+    auto p = Modulus(PlainModulus::Batching(8192, 60));
+    
+    oc::Timer timer;
+    timer.setTimePoint("start");
+
+    PRNG prng(oc::ZeroBlock);
+    vector<block> key1(n);
+    vector<block> key2(n);
+    vector<uint64_t> value(n);
+
+    prng.get<block>(key1);
+    prng.get<block>(key2);
+    prng.get<uint64_t>(value);
+
+    for (uint32_t i = 0; i < n/2; i++) {
+        key2[i] = key1[i];
+    }
+
+    for (uint32_t i = 0; i < n; i++) {
+        value[i] = barrett_reduce_64(value[i], p);
+    }
+
+    PrimeFieldOkvs okvs;
+    okvs.setTimer(timer);
+    okvs.init(n, m, w, p);
+
+    vector<uint64_t> encoded(m);
+    vector<uint64_t> bands_flat(n*w);
+    vector<uint32_t> start_pos(n);
+    okvs.generate_binary_band(key1, bands_flat, start_pos, oc::ZeroBlock);
+
+    vector<uint64_t> value_copy(value);
+    okvs.sgauss_elimination(bands_flat, value_copy, start_pos, encoded);
+    
+    vector<uint64_t> decoded(n);
+    
+    okvs.generate_binary_band(key2, bands_flat, start_pos, oc::ZeroBlock);
+
+    for (uint32_t i = 0; i < n; ++i)
+    {
+        const uint64_t *__restrict row = bands_flat.data() + static_cast<size_t>(i) * w;
+        uint64_t acc = 0;
+        for (uint32_t j = 0; j < w; ++j){
+            acc = multiply_add_uint_mod(row[j], encoded[start_pos[i] + j], acc, p);
+        }
+        decoded[i] = acc;
+    }    
+    
+    u32 cnt = 0;
+    for (u64 i = 0; i < decoded.size(); i++) {
+        if (value[i] != decoded[i]) cnt++;
+    }
+    if (cnt != n/2) {
+        cout << cnt << " != " << n/2 << endl;
+        throw RTE_LOC;
+    }
 
     if (cmd.isSet("v")) {
         cout << endl;
@@ -147,8 +215,8 @@ void width_test(const oc::CLP& cmd)
              << trials_total; 
     const std::string fname = fname_os.str();
 
-    //u32 m = roundUpTo(m_ratio*n, 8192);  // t_s = 2^13 
-    u32 m = m_ratio*n;  // t_s = 2^13 
+    u32 m = roundUpTo(m_ratio*n, 8192);  // t_s = 2^13 
+    //u32 m = m_ratio*n;  // t_s = 2^13 
 
     cout << "m : " << m << endl;
 

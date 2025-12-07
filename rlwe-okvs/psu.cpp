@@ -1,12 +1,5 @@
 #include "psu.h"
-#include "rlwe-okvs/sspmt.h"
-#include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
-#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
-#include "libOTe/Vole/Silent/SilentVoleReceiver.h"
-#include "libOTe/Vole/Silent/SilentVoleSender.h"
-#include "band_okvs/band_okvs.h"
-#include "band_okvs/band.h"
-#include "band_okvs/oprf.h"
+
 #include <memory>
 
 #include <set>
@@ -22,12 +15,10 @@ namespace rlweOkvs
         Socket &chl)
     {
         vector<block> FY;
-        OprfSender oprfSender;
+        
         oprfSender.init(mN, mNreceiver, mPrng.get());
-        co_await oprfSender.run(Y, FY, chl);    
-                
-        SspmtSender sspmtSender;
-        std::cout << "in run: " << mSsParams.bandWidth << std::endl;
+        co_await oprfSender.run(Y, FY, chl);                    
+        
         sspmtSender.init(mN, mNreceiver, mSsParams, mPrng.get());
         sspmtSender.setTimer(getTimer());
 
@@ -36,8 +27,7 @@ namespace rlweOkvs
         auto ot_idx = sspmtSender.get_ot_idx();
         
         auto comm = chl.bytesSent() + chl.bytesReceived();
-        
-        SilentOtExtSender otSender;
+                
         vector<array<block, 2>> rotMsgs(mN);
         co_await otSender.send(rotMsgs, mPrng, chl);
 
@@ -61,18 +51,17 @@ namespace rlweOkvs
         Socket &chl)
     {
         vector<block> FX;
-        OprfReceiver oprfreceiver;
+        
         oprfreceiver.init(mN, mNsender, mPrng.get());
         co_await oprfreceiver.run(X, FX, chl);        
-                
-        SspmtReceiver sspmtReceiver;
+           
         sspmtReceiver.init(mN, mNsender, mSsParams, mPrng.get());
         sspmtReceiver.setTimer(getTimer());
 
         BitVector sspmt;
         co_await sspmtReceiver.run(FX, sspmt, chl);
 
-        SilentOtExtReceiver otReceiver;
+        
         vector<block> rotMsgs(mNsender);
         co_await otReceiver.receive(sspmt, rotMsgs, mPrng, chl);
 
