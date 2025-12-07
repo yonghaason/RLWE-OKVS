@@ -46,6 +46,12 @@ namespace rlweOkvs
                 std::vector<uint32_t> &start_pos,
                 oc::block seed);
 
+            void generate_binary_band(
+                const std::vector<oc::block> &key,
+                std::vector<uint64_t> &bands_flat,
+                std::vector<uint32_t> &start_pos,
+                oc::block seed);
+
             bool sgauss_elimination(
                 std::vector<uint64_t> &bands_flat,
                 std::vector<uint64_t> &value,

@@ -14,6 +14,206 @@ using namespace volePSI;
 
 namespace rlweOkvs 
 {
+    void SspmtSender::sequencing_naive(
+        const std::vector<uint32_t>& start_pos_spacing
+    )
+    {
+        std::vector<std::vector<uint32_t>> bins_items(mNumSlots);
+        
+        for (uint32_t i = 0; i < mN; ++i) {
+            uint32_t pos = start_pos_spacing[i];
+            uint32_t binidx = pos % mNumSlots;
+            mItemToLayerIdx[i] = bins_items[binidx].size();
+            bins_items[binidx].push_back(i);
+        }
+
+        bin_sizes.resize(mNumSlots);
+        for (size_t i = 0; i < mNumSlots; i++) {
+            bin_sizes[i] = bins_items[i].size();
+        }
+
+        mNumLayers = 0;
+        for (const auto& v : bin_sizes) mNumLayers = max(mNumLayers, v);
+
+        ot_idx.resize(mN);
+        size_t idx = 0;
+
+        if (mRpmt) {
+            for (size_t mat = 0; mat < mNumLayers; ++mat) {
+                for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+                    const auto& vec = bins_items[bin];
+                    if (mat < vec.size())
+                        ot_idx[idx++] = vec[mat];
+                }
+            }
+        }
+        else {
+            maskings.resize(mN);
+            ptxts_mask.resize(mNumLayers);
+            vector<vector<uint64_t>> raw_masks(mNumLayers);            
+            for (size_t mat = 0; mat < mNumLayers; mat++) {
+                raw_masks[mat].resize(mNumSlots);
+                mPrng.get<uint64_t>(raw_masks[mat]);
+                for (uint32_t bin = 0; bin < mNumSlots; bin++) {
+                    raw_masks[mat][bin] = seal::util::barrett_reduce_64(raw_masks[mat][bin], mModulus);
+                    const auto& vec = bins_items[bin];
+                    if (mat < vec.size()) {
+                        ot_idx[idx] = vec[mat];
+                        maskings[idx++] = raw_masks[mat][bin];
+                    }
+                }
+                mBatchEncoder->encode(raw_masks[mat], ptxts_mask[mat]);
+            }
+        }
+    }
+
+    void SspmtSender::sequencing_with_span(
+            const std::vector<uint32_t>& start_pos_spacing,
+            uint32_t span_blocks
+    )
+    {
+        std::vector<uint32_t> item_binidx(mN);
+        mItemToBlockIdx.resize(mN);
+        uint32_t max_block = 0;
+
+        for (uint32_t i = 0; i < mN; ++i) {
+            uint32_t pos = start_pos_spacing[i];
+            uint32_t bin = pos % mNumSlots;
+            uint32_t blk = pos / mNumSlots;
+
+            item_binidx[i]   = bin;
+            mItemToBlockIdx[i] = blk;
+            if (blk > max_block) max_block = blk;
+        }
+
+        std::vector<std::vector<uint32_t>> block_items(max_block + 1);
+        for (uint32_t i = 0; i < mN; ++i) {
+            block_items[mItemToBlockIdx[i]].push_back(i);
+        }        
+        
+        struct Layer {
+            uint32_t min_block;
+            uint32_t max_block;
+            std::vector<uint8_t> used_bins;
+        };
+        std::vector<Layer> layers;
+
+        for (uint32_t blk = 0; blk <= max_block; ++blk) {
+            auto& bucket = block_items[blk];
+            for (uint32_t idx : bucket) {
+                uint32_t r = item_binidx[idx];    // bin (residue)
+                uint32_t j = mItemToBlockIdx[idx];  // block
+
+                bool placed = false;
+                for (uint32_t li = 0; li < layers.size(); ++li) {
+                    Layer& L = layers[li];
+
+                    if (L.used_bins[r]) {
+                        continue;
+                    }
+
+                    uint32_t new_min = (L.used_bins.empty() ? j : std::min(L.min_block, j));
+                    uint32_t new_max = (L.used_bins.empty() ? j : std::max(L.max_block, j));
+                    uint32_t span = new_max - new_min + 1;
+
+                    if (span <= span_blocks) {
+                        if (L.used_bins.empty()) {
+                            L.used_bins.assign(mNumSlots, 0);
+                        }
+                        L.used_bins[r] = 1;
+                        L.min_block = new_min;
+                        L.max_block = new_max;
+                        mItemToLayerIdx[idx] = li;
+                        placed = true;
+                        break;
+                    }
+                }
+
+                if (!placed) {
+                    Layer nl;
+                    nl.min_block = j;
+                    nl.max_block = j;
+                    nl.used_bins.assign(mNumSlots, 0);
+                    nl.used_bins[r] = 1;
+                    layers.push_back(std::move(nl));
+                    mItemToLayerIdx[idx] = layers.size() - 1;
+                }
+            }
+        }
+        
+        mNumLayers = layers.size();
+        mLayerMinBlock.resize(mNumLayers);
+        mLayerMaxBlock.resize(mNumLayers);
+        for (uint32_t l = 0; l < mNumLayers; ++l) {
+            mLayerMinBlock[l] = layers[l].min_block;
+            mLayerMaxBlock[l] = layers[l].max_block;
+        }
+
+        std::vector<std::vector<uint32_t>> bin_layers(mNumSlots);
+        mLayerBins.resize(mNumLayers);
+        for (uint32_t l = 0; l < mNumLayers; l++) {
+            mLayerBins[l].assign(mNumSlots, UINT32_MAX);
+        }
+
+
+        for (uint32_t i = 0; i < mN; ++i) {
+            uint32_t bin = item_binidx[i];
+            uint32_t l = mItemToLayerIdx[i];
+            bin_layers[bin].push_back(l);
+            mLayerBins[l][bin] = i;
+        }
+
+        bin_sizes.resize(mNumSlots);
+        
+        for (uint32_t k = 0; k < mNumSlots; ++k) {
+            auto& nonempty_layers = bin_layers[k];
+            if (nonempty_layers.empty()) {
+                continue;
+            }
+            // last (nonempty) layer of k-th bin
+            uint32_t last_layer = 0;
+            for (auto& layeridx: nonempty_layers) {
+                last_layer = max(layeridx, last_layer);
+            }
+            bin_sizes[k] = last_layer+1;
+            BitVector oc_indicator(last_layer+1);            
+            for (auto& layeridx: nonempty_layers) {
+                oc_indicator[layeridx] = 1;
+            }
+            occupy_indicator_flat.append(oc_indicator);
+        }
+
+        ot_idx.resize(mN);
+        size_t idx = 0;
+
+        if (mRpmt) {
+            for (size_t lay = 0; lay < mNumLayers; ++lay) {
+                for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+                    if (mLayerBins[lay][bin] != UINT32_MAX) {
+                        ot_idx[idx++] = mLayerBins[lay][bin];
+                    }
+                }
+            }
+        }
+        else {
+            maskings.resize(mN);
+            ptxts_mask.resize(mNumLayers);
+            vector<vector<uint64_t>> raw_masks(mNumLayers);            
+            for (size_t lay = 0; lay < mNumLayers; lay++) {
+                raw_masks[lay].resize(mNumSlots);
+                mPrng.get<uint64_t>(raw_masks[lay]);
+                for (uint32_t bin = 0; bin < mNumSlots; bin++) {
+                    raw_masks[lay][bin] = seal::util::barrett_reduce_64(raw_masks[lay][bin], mModulus);
+                    if (mLayerBins[lay][bin] != UINT32_MAX) {
+                        ot_idx[idx] = mLayerBins[lay][bin];
+                        maskings[idx++] = raw_masks[lay][bin];
+                    }
+                }
+                mBatchEncoder->encode(raw_masks[lay], ptxts_mask[lay]);
+            }
+        }
+    }
+
     void SspmtSender::init(
         uint32_t n, uint32_t nReceiver, 
         sspmtParams ssParams, oc::block seed)
@@ -25,14 +225,14 @@ namespace rlweOkvs
         mN = n;
         mNreceiver = nReceiver;
         mM = roundUpTo(ssParams.bandExpansion * n, mNumSlots);
-        mW = ssParams.bandWidth; // 134 for 1.16
+        mW = ssParams.bandWidth;
         mNumBatch = mM / mNumSlots;
         mWrap = divCeil(mW * mNumSlots, mM) + 1;
         mPrng.SetSeed(seed);        
 
-        cout << mW << ", " << mWrap << endl;
+        // cout << mW << ", " << mWrap << endl;
         
-        parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
+        parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));        
         mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
         parms.set_plain_modulus(mModulus);
         
@@ -83,7 +283,11 @@ namespace rlweOkvs
         co_await chl.send(decoded_in_he.size());        
         co_await chl.send(move(sendstream.str()));
         co_await chl.send(move(bin_sizes));
-        setTimePoint("Sender::Serialize & Send");        
+        if (mSeqOpti) {
+            co_await chl.send(move(occupy_indicator_flat));
+        }
+
+        setTimePoint("Sender::Serialize & Send");    
     }
 
     Proto SspmtSender::run(
@@ -109,8 +313,8 @@ namespace rlweOkvs
         auto cir = isZeroCircuit(keyBitLength);
         gmw.init(Y.size(), cir, 1, mOTeBatchSize, 0, mPrng.get());
         gmw.setInput(0, gmwin);
-
         co_await gmw.run(chl);
+
         auto rr = gmw.getOutputView(0);
         results.resize(Y.size());
         std::copy(rr.begin(), rr.end(), results.data());
@@ -137,112 +341,117 @@ namespace rlweOkvs
             start_pos_spacing[i] = r * mNumSlots + q;
         }
 
-        // Optimized Sequencing
-        std::vector<std::vector<uint32_t>> bins_items(mNumSlots);
-        std::vector<uint32_t> item_binidx(mN);
-        std::vector<uint32_t> item_matrix_idx(mN);
-
-        for (uint32_t i = 0; i < mN; ++i) {
-            uint32_t pos = start_pos_spacing[i];
-            uint32_t binidx = pos % mNumSlots;
-            item_binidx[i] = binidx;
-            item_matrix_idx[i] = bins_items[binidx].size();
-            bins_items[binidx].push_back(i);
-        }
-
-        bin_sizes.resize(mNumSlots);
-        for (size_t i = 0; i < mNumSlots; i++) {
-            bin_sizes[i] = bins_items[i].size();
-        }
-
-        uint32_t L = 0;
-        for (const auto& v : bin_sizes) L = max(L, v);
-
-        std::vector<std::vector<uint64_t>> T_diags_flat(mWrap);
-        for (size_t i = 0; i < mWrap; i++) {
-            T_diags_flat[i].resize(L * mM);
-        }
-
-        const uint64_t* bands = bands_flat.data();
-
-        for (uint32_t i = 0; i < mN; ++i) {
-            const uint32_t row = item_matrix_idx[i];
-            const uint64_t* src = bands + i * mW;
-
-            uint32_t p = start_pos_spacing[i];
-            uint32_t diagidx = 0;
-            for (size_t w = 0; w < mW; ++w) {
-                T_diags_flat[diagidx][row * mM + p] = src[w];
-                p += mNumSlots;
-                if (p >= mM) {
-                    p -= mM;
-                    diagidx++;
-                }
-            }
-        }
+        mItemToLayerIdx.resize(mN);
         
-        ot_idx.resize(mN);
-        size_t idx = 0;
+        if (mSeqOpti) {
+            uint32_t span_blocks = 0; // TODO: configurable / opti ....
+            if (mN == 1ull << 16) span_blocks = 5;
+            if (mN == 1ull << 18) span_blocks = 13;
+            if (mN == 1ull << 20) span_blocks = 20;
+            if (mN == 1ull << 22) span_blocks = 30;
+            sequencing_with_span(start_pos_spacing, span_blocks);
 
-        if (mRpmt) {
-            for (size_t mat = 0; mat < L; ++mat) {
-                for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
-                    const auto& vec = bins_items[bin];
-                    if (mat < vec.size())
-                        ot_idx[idx++] = vec[mat];
-                }
+            setTimePoint("Sender::Sequencing");
+
+            const uint64_t* bands = bands_flat.data();
+
+            ptxts_diags.resize(mWrap);
+            for (size_t k = 0; k < mWrap; ++k) {
+                ptxts_diags[k].assign(mNumLayers * mNumBatch, seal::Plaintext(mNumSlots)); 
             }
-        }
-        else {
-            maskings.resize(mN);
-            ptxts_mask.resize(L);
-            vector<vector<uint64_t>> raw_masks(L);            
-            for (size_t mat = 0; mat < L; mat++) {
-                raw_masks[mat].resize(mNumSlots);
-                mPrng.get<uint64_t>(raw_masks[mat]);
-                for (uint32_t bin = 0; bin < mNumSlots; bin++) {
-                    raw_masks[mat][bin] = seal::util::barrett_reduce_64(raw_masks[mat][bin], mModulus);
-                    const auto& vec = bins_items[bin];
-                    if (mat < vec.size()) {
-                        ot_idx[idx] = vec[mat];
-                        maskings[idx++] = raw_masks[mat][bin];
+
+            std::vector<uint64_t> plainVec(mNumSlots);
+
+            for (uint32_t i = 0; i < mNumLayers; ++i) {
+                uint32_t Bmin = mLayerMinBlock[i];
+                uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
+                
+                for (uint32_t B = Bmin; B <= Bmax; ++B) {
+                    uint32_t k = B / mNumBatch;  // diag index
+                    uint32_t j = B % mNumBatch;  // batch (block) index
+                    if (k >= mWrap) continue;
+
+                    size_t outIdx = i * mNumBatch + j;
+
+                    bool all_zero = true;
+                    for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+                        uint32_t item = mLayerBins[i][bin];
+                        uint64_t val = 0;
+                        if (item != UINT32_MAX) {
+                            uint32_t startBlk = mItemToBlockIdx[item];
+                            if (B >= startBlk && B < startBlk + mW) {
+                                uint32_t w = B - startBlk;
+                                val = bands[item * mW + w];
+                            }
+                        }
+                        plainVec[bin] = val;
+                        if (val != 0) all_zero = false;
+                    }
+
+                    if (!all_zero) {
+                        mBatchEncoder->encode(plainVec, ptxts_diags[k][outIdx]);
                     }
                 }
-                mBatchEncoder->encode(raw_masks[mat], ptxts_mask[mat]);
             }
+            setTimePoint("Sender::HE Encode");
         }
+        else {
+            sequencing_naive(start_pos_spacing);
+            
+            setTimePoint("Sender::Sequencing");
 
-        //Batch  
-        vector<uint64_t> plainVec(mNumSlots);
-        ptxts_diags.resize(mWrap);
-        for (size_t i = 0; i < mWrap; i++) {
-            ptxts_diags[i].resize(L*mNumBatch);
-        }
-        
-        size_t outIdx = 0;
-        for (size_t i = 0; i < L; ++i) {
-            for (uint32_t j = 0; j < mNumBatch; ++j) {
-                const size_t off = i * mM + j * mNumSlots;
-                for (size_t k = 0; k < mWrap; k++) {
-                    std::copy_n(&T_diags_flat[k][off], mNumSlots, plainVec.data());
-                    mBatchEncoder->encode(plainVec, ptxts_diags[k][outIdx]);                
-                }
-                outIdx++;
+            std::vector<std::vector<uint64_t>> T_diags_flat(mWrap);
+            for (size_t i = 0; i < mWrap; i++) {
+                T_diags_flat[i].resize(mNumLayers * mM);
             }
+
+            const uint64_t* bands = bands_flat.data();
+
+            for (uint32_t i = 0; i < mN; ++i) {
+                const uint32_t row = mItemToLayerIdx[i];
+                const uint64_t* src = bands + i * mW;
+
+                uint32_t p = start_pos_spacing[i];
+                uint32_t diagidx = 0;
+                for (size_t w = 0; w < mW; ++w) {
+                    T_diags_flat[diagidx][row * mM + p] = src[w];
+                    p += mNumSlots;
+                    if (p >= mM) {
+                        p -= mM;
+                        diagidx++;
+                    }
+                }
+            }
+
+            //Batch  
+            vector<uint64_t> plainVec(mNumSlots);
+            ptxts_diags.resize(mWrap);
+            for (size_t i = 0; i < mWrap; i++) {
+                ptxts_diags[i].resize(mNumLayers*mNumBatch);
+            }
+            
+            size_t outIdx = 0;
+            for (size_t i = 0; i < mNumLayers; ++i) {
+                for (uint32_t j = 0; j < mNumBatch; ++j) {
+                    const size_t off = i * mM + j * mNumSlots;
+                    for (size_t k = 0; k < mWrap; k++) {
+                        std::copy_n(&T_diags_flat[k][off], mNumSlots, plainVec.data());
+                        mBatchEncoder->encode(plainVec, ptxts_diags[k][outIdx]);
+                    }
+                    outIdx++;
+                }
+            }
+            setTimePoint("Sender::HE Encode");
         }
-        setTimePoint("Sender::Sequencing & HE Encode");
     }
 
     void SspmtSender::encrypted_decode(
         const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
         std::vector<seal::Ciphertext> &decoded_in_he)
-    {
-        u32 L = 0;
-        for (auto& s: bin_sizes) L = max(L, s);
+    {        
+        decoded_in_he.resize(mNumLayers);
 
-        decoded_in_he.resize(L);
-
-        for (size_t i = 0; i < L; ++i) {
+        for (size_t i = 0; i < mNumLayers; ++i) {
             bool initialized = false;
             Ciphertext tmp;
             for (size_t j = 0; j < mNumBatch; ++j) {
@@ -264,7 +473,7 @@ namespace rlweOkvs
         }
 
         if (!mRpmt) {
-            for (size_t i = 0; i < L; ++i) {
+            for (size_t i = 0; i < mNumLayers; ++i) {
                 mEvaluator->add_plain_inplace(decoded_in_he[i], ptxts_mask[i]);
             }
         }
@@ -286,7 +495,7 @@ namespace rlweOkvs
         mN = n;
         mNsender = nSender;
         mM = roundUpTo(ssParams.bandExpansion * n, mNumSlots);
-        mW = ssParams.bandWidth; // 134 for 1.16
+        mW = ssParams.bandWidth;
         mNumBatch = mM / mNumSlots;
         mWrap = divCeil(mW * mNumSlots, mM) + 1;
         mPrng.SetSeed(seed);
@@ -294,7 +503,7 @@ namespace rlweOkvs
         parms.set_coeff_modulus(CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
         mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
         parms.set_plain_modulus(mModulus);
-        
+
         mContext = make_shared<SEALContext>(parms);
         KeyGenerator keygen(*mContext);
         SecretKey secret_key = keygen.secret_key();
@@ -323,6 +532,20 @@ namespace rlweOkvs
         co_await chl.recv(decoded_he_size);
         co_await chl.recvResize(recvstring);
         co_await chl.recvResize(bin_sizes);
+        if (mSeqOpti) {
+            auto len = 0;
+            for (size_t i = 0; i < mNumSlots; i++) {
+                len += bin_sizes[i];
+            }
+            oc::BitVector occupy_indicator_flat(len);
+            co_await chl.recv(occupy_indicator_flat);
+            auto offset = 0;
+            occupy_indicator.resize(mNumSlots);
+            for (size_t i = 0; i < mNumSlots; i++) {
+                occupy_indicator[i].append(occupy_indicator_flat.data(), bin_sizes[i], offset);
+                offset += bin_sizes[i];
+            }
+        }
         stringstream recvstream;
         recvstream.write(recvstring.data(), recvstring.size());
 
@@ -361,8 +584,8 @@ namespace rlweOkvs
             auto cir = isZeroCircuit(keyBitLength);
             gmw.init(mNsender, cir, 1, mOTeBatchSize, 1, mPrng.get());
             gmw.setInput(0, gmwin);
-
             co_await gmw.run(chl);
+
             auto rr = gmw.getOutputView(0);
             results.resize(mNsender);
             std::copy(rr.begin(), rr.end(), results.data());
@@ -422,8 +645,8 @@ namespace rlweOkvs
         const size_t L = decoded_in_he.size();
         vector<Plaintext> ptxts(L);
    
-        // cout << "Noise Budget: " 
-        // << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
+        cout << "Noise Budget: " 
+        << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
 
         for(size_t i = 0; i < L; i++){
             mDecryptor->decrypt(decoded_in_he[i], ptxts[i]);
@@ -435,9 +658,20 @@ namespace rlweOkvs
         auto idx = 0;
         for(size_t i = 0; i < L; i++){
             mBatchEncoder->decode(ptxts[i], decodeVec);
-            for(size_t j = 0; j < mNumSlots; j++) {
-                if (i < bin_sizes[j]) {
-                    dec_results[idx++] = decodeVec[j];
+            if (mSeqOpti) {
+                for(size_t j = 0; j < mNumSlots; j++) {
+                    if (i < occupy_indicator[j].size()) {
+                        if (occupy_indicator[j][i]) {
+                            dec_results[idx++] = decodeVec[j];
+                        }
+                    }
+                }
+            }
+            else {
+                for(size_t j = 0; j < mNumSlots; j++) {
+                    if (i < bin_sizes[j]) {
+                        dec_results[idx++] = decodeVec[j];
+                    }
                 }
             }
         }

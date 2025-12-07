@@ -7,6 +7,9 @@
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include <array>
 
+//for debugging
+using namespace std;
+
 namespace volePSI
 {
 	using PRNG = oc::PRNG;
@@ -57,6 +60,7 @@ namespace volePSI
 		setTimePoint("Gmw::generateTriple begin");
 		
 		tg.init(mNumOts, mBatchSize, mNumThreads, mIdx ? Mode::Receiver : Mode::Sender, mPrng.get());
+
 		if (tg.hasBaseOts() == false) {
 			co_await(tg.generateBaseCors(mPrng, chl));
 		}
@@ -166,7 +170,6 @@ namespace volePSI
 		if (mO.mDebug)
 		{
 			mO.mWords.resize(mWords.rows(), mWords.cols());
-
 			co_await(chl.send(coproto::copy(mWords)));
 			co_await(chl.recv(mO.mWords));
 
@@ -370,6 +373,9 @@ namespace volePSI
 				throw RTE_LOC;
 		}
 
+
+
+
 		for (gate = gates.begin(); gate < gates.end(); ++gate)
 		{
 			in = { mWords[gate->mInput[0]], mWords[gate->mInput[1]] };
@@ -384,7 +390,6 @@ namespace volePSI
 				co_await(multRecv(in[0], in[1], out, chl, gate->mType));
 			}
 		}
-
 
 
 		if (mO.mDebug)
@@ -493,7 +498,6 @@ namespace volePSI
 		}
 
 		++mRoundIdx;
-
 	}
 
 	oc::BitVector view(block v, u64 l = 10)
@@ -639,7 +643,7 @@ namespace volePSI
 			auto b = span<block>{};
 			auto w = std::vector<block>{};
 		w.resize(width);
-		co_await(chl.recv(w));
+		co_await(chl.recv(w)); //main problem!!(solved)
 
 		b = mB.subspan(0, width);
 		mB = mB.subspan(width);
@@ -707,8 +711,10 @@ namespace volePSI
 
 		zz.resize(z.size());
 		zz2.resize(z.size());
+
 		co_await(multRecvP1(x, zz, chl, gt));
 		co_await(multRecvP2(y, zz2, chl));
+
 
 		xm = invertA(gt) ? oc::AllOneBlock : oc::ZeroBlock;
 		ym = invertB(gt) ? oc::AllOneBlock : oc::ZeroBlock;

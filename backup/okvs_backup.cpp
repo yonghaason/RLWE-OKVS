@@ -16,6 +16,9 @@
 #include <thread>
 #include <vector>
 #include <filesystem> 
+#include <cstdint>
+#include <mutex>
+#include <sstream>
 
 using namespace std;
 using namespace seal;
@@ -319,22 +322,6 @@ bool sgauss_modified_timer_flat_ptr(
     }
     return true;
 }
-
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <mutex>
-#include <seal/seal.h>
-#include <sstream>
-#include <thread>
-#include <vector>
-
-using namespace seal;
-
 
 int many_trials(int logn, double m_ratio, int logp, int trials_total)
 {

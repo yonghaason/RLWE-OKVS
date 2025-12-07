@@ -88,6 +88,27 @@ namespace rlweOkvs
     setTimePoint("OKVS: Generate Band");
 };
 
+void PrimeFieldOkvs::generate_binary_band(
+        const std::vector<oc::block> &key,
+        std::vector<uint64_t> &bands_flat,
+        std::vector<uint32_t> &start_pos,
+        oc::block seed)
+{
+    PRNG prng;
+    // Generate random-band matrix
+    
+#pragma GCC unroll 16 
+    for (uint32_t i = 0; i < mN; i++) {
+        prng.SetSeed(key[i] ^ seed);
+        start_pos[i] = prng.get<uint32_t>() % (mM-mW);
+        prng.get<uint64_t>(bands_flat.data() + i*mW, mW);
+        for (uint32_t j = 0; j < mW; j++) {
+            bands_flat[i*mW + j] %= 2;
+        }
+    }
+    setTimePoint("OKVS: Generate Band");
+};
+
     bool PrimeFieldOkvs::sgauss_elimination(
         std::vector<uint64_t> &bands_flat,
         std::vector<uint64_t> &value,

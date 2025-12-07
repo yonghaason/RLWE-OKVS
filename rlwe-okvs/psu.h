@@ -7,7 +7,9 @@
 #include "cryptoTools/Network/Channel.h"
 #include "coproto/coproto.h"
 #include "rlwe-okvs/sspmt.h"
-
+#include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
+#include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
+#include "band_okvs/oprf.h"
 #include "seal/seal.h"
 
 int psu(int n, int t_s, int m,  vector<int> vector);
@@ -25,12 +27,25 @@ namespace rlweOkvs
         oc::PRNG mPrng;        
         sspmtParams mSsParams;
 
+        OprfSender oprfSender;
+        SspmtSender sspmtSender;
+        SilentOtExtSender otSender;
+
     public:
-        void init(uint32_t n, uint32_t nReceiver, 
+        void seqopti_on() {sspmtSender.seqopti_on();};
+
+        void initWithParam(uint32_t n, uint32_t nReceiver, 
             sspmtParams ssParams, oc::block seed) {
             mN = n;
             mNreceiver = nReceiver;
             mSsParams = ssParams;
+            mPrng.SetSeed(seed);
+        };
+
+        void init(uint32_t n, uint32_t nReceiver, oc::block seed) {
+            mN = n;
+            mNreceiver = nReceiver;
+            mSsParams.initialize(nReceiver);
             mPrng.SetSeed(seed);
         };
 
@@ -46,12 +61,26 @@ namespace rlweOkvs
         oc::PRNG mPrng;
         sspmtParams mSsParams;
 
+        OprfReceiver oprfreceiver;
+        SspmtReceiver sspmtReceiver;
+        SilentOtExtReceiver otReceiver;
+
     public:
-        void init(uint32_t n, uint32_t nSender, 
+        void seqopti_on() {sspmtReceiver.seqopti_on();};
+
+        void initWithParam(uint32_t n, uint32_t nSender, 
             sspmtParams ssParams, oc::block seed) {
             mN = n;
             mNsender = nSender;
             mSsParams = ssParams;
+            mPrng.SetSeed(seed);
+        };
+
+
+        void init(uint32_t n, uint32_t nSender, oc::block seed) {
+            mN = n;
+            mNsender = nSender;
+            mSsParams.initialize(n);
             mPrng.SetSeed(seed);
         };
 
