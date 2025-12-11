@@ -19,7 +19,7 @@ namespace rlweOkvsTests {
     t.add("RPMT_protocol_test               ", rpmt_protocol_test);
     t.add("OPRF_protocol_test               ", oprf_protocol_test);
     t.add("PSU_protocol_test                ", psu_protocol_test);
-    t.add("PSU_cluster_test                 ", psu_protocol_opti_test);
+    t.add("DELPSU_protocol_test             ", del_psu_protocol_test);
     t.add("GMW_iszero_test                  ", Gmw_iszero_test);
     t.add("Sequencing_test                  ", sequencing_test);
     });

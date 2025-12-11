@@ -23,7 +23,13 @@ namespace rlweOkvs
         sspmtSender.setTimer(getTimer());
 
         BitVector sspmt;
-        co_await sspmtSender.run(FY, sspmt, chl);
+        if (!mRpmt) {
+            co_await sspmtSender.run(FY, sspmt, chl);
+        }
+        else {
+            sspmt.resize(mN);
+            co_await sspmtSender.run(FY, chl);
+        }
         auto ot_idx = sspmtSender.get_ot_idx();
         
         auto comm = chl.bytesSent() + chl.bytesReceived();
@@ -60,7 +66,6 @@ namespace rlweOkvs
 
         BitVector sspmt;
         co_await sspmtReceiver.run(FX, sspmt, chl);
-
         
         vector<block> rotMsgs(mNsender);
         co_await otReceiver.receive(sspmt, rotMsgs, mPrng, chl);

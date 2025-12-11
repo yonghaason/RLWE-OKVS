@@ -33,14 +33,16 @@ namespace rlweOkvs
         std::vector<int> heCoeffModulus;
         u32 hePlainModulusBits;
         u32 bandWidth;
+        u32 span_blocks;
         double bandExpansion;
-        void initialize(int n){
+        void initialize(int n) {
             switch(n){
                 case (1ull << 16):
                     heCoeffModulus = {40, 34, 55, 50};
                     hePlainModulusBits = 56;
                     bandWidth = 21;
                     bandExpansion = 2.9;
+                    span_blocks = 5;
                     break;
                 case (1ull << 18):
                     heCoeffModulus = {40, 36, 57, 50};
@@ -49,20 +51,31 @@ namespace rlweOkvs
                     // bandExpansion = 1.3;
                     bandWidth = 52;
                     bandExpansion = 1.5;
+                    span_blocks = 13;
                     break;
                 case (1ull << 20):
                     heCoeffModulus = {40, 38, 59, 50};
                     hePlainModulusBits = 60;
-                    // bandWidth = 142;
-                    // bandExpansion = 1.15;
+                    // bandWidth = 53;
+                    // bandExpansion = 1.5;
+                    // bandWidth = 80;
+                    // bandExpansion = 1.3;
                     bandWidth = 109;
                     bandExpansion = 1.2;
+                    // bandWidth = 22;
+                    // bandExpansion = 2.9;
+                    span_blocks = 20;                    
                     break;
                 case (1ull << 22):
                     heCoeffModulus = {40, 40, 58, 50};
                     hePlainModulusBits = 60; // SEAL의 한계로 60을 써야 함.
+                    // bandWidth = 56;
+                    // bandExpansion = 1.5;
+                    // bandWidth = 88;
+                    // bandExpansion = 1.3;
                     bandWidth = 116;
                     bandExpansion = 1.2;
+                    span_blocks = 30;
                     break;
                 default:
                     heCoeffModulus = {40, 40, 58, 60};
@@ -77,7 +90,6 @@ namespace rlweOkvs
     class SspmtSender: public oc::TimerAdapter
     {
         
-    public:
         oc::PRNG mPrng;
         Modulus mModulus;
         uint64_t mNumSlots;
@@ -88,6 +100,7 @@ namespace rlweOkvs
         uint32_t mN, mNreceiver, mM, mW, mNumBatch, mWrap;
         uint32_t mW_seq;
         uint32_t mNumLayers;
+        uint32_t mSpanBlocks;
         std::vector<uint32_t> mItemToLayerIdx;
         std::vector<uint32_t> mItemToBlockIdx;
         std::vector<std::vector<uint32_t>> mLayerBins;
@@ -103,27 +116,26 @@ namespace rlweOkvs
         
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
 
-        bool mSeqOpti = false;
         bool mRpmt = false;
         uint64_t mOTeBatchSize = 1ull << 19; 
         
-    // public:
-        void sequencing_with_span(
-            const std::vector<uint32_t>& start_pos_spacing,
-            uint32_t span_blocks          
-        );
-
-        void sequencing_naive(
-            const std::vector<uint32_t>& start_pos_spacing
-        );
-
+    public:
+        void sequencing(const std::vector<uint32_t>& start_pos_spacing);
+    
         void init(
             uint32_t n, uint32_t nReceiver, 
             sspmtParams ssParams, oc::block seed = oc::OneBlock);
 
         void rpmt_on() {mRpmt = true;};
-        void seqopti_on() {mSeqOpti = true;};
         auto get_ot_idx() {return ot_idx;};
+        u32 getNumLayers() {return mNumLayers;};
+        u32 getMaxbinsize() {
+            u32 maxbinsize = 0;
+            for (size_t i = 0; i < bin_sizes.size(); i++){
+                maxbinsize = std::max(bin_sizes[i], maxbinsize);
+            }
+            return maxbinsize;
+        }
 
         Proto run(
             const std::vector<oc::block> &Y, 
@@ -144,9 +156,6 @@ namespace rlweOkvs
 
     class SspmtReceiver: public oc::TimerAdapter
     {
-
-        
-    public:
         oc::PRNG mPrng;
         Modulus mModulus;
         uint64_t mNumSlots;
@@ -162,18 +171,16 @@ namespace rlweOkvs
         std::vector<uint32_t> bin_sizes;
         std::vector<oc::BitVector> occupy_indicator;
 
-        bool mSeqOpti = false;
         bool mRpmt = false;
         uint64_t mOTeBatchSize = 1ull << 19;
         
 
-    // public:
+    public:
         void init(
             uint32_t n, uint32_t nSender, 
             sspmtParams ssParams, oc::block seed = oc::ZeroBlock);
 
         void rpmt_on() {mRpmt = true;};
-        void seqopti_on() {mSeqOpti = true;};
 
         Proto run(
             const std::vector<oc::block> &X, 
