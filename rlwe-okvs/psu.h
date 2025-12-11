@@ -25,15 +25,19 @@ namespace rlweOkvs
         uint32_t mN;
         uint32_t mNreceiver;
         oc::PRNG mPrng;        
-        sspmtParams mSsParams;
+        sspmtParams mSsParams;        
+        bool mRpmt = false;
 
         OprfSender oprfSender;
         SspmtSender sspmtSender;
         SilentOtExtSender otSender;
 
     public:
-        void seqopti_on() {sspmtSender.seqopti_on();};
-
+        void rpmt_on() {
+            sspmtSender.rpmt_on();
+            mRpmt = true;
+        }
+        
         void initWithParam(uint32_t n, uint32_t nReceiver, 
             sspmtParams ssParams, oc::block seed) {
             mN = n;
@@ -60,13 +64,19 @@ namespace rlweOkvs
         uint32_t mNsender;
         oc::PRNG mPrng;
         sspmtParams mSsParams;
+        bool mRpmt = false;
 
         OprfReceiver oprfreceiver;
         SspmtReceiver sspmtReceiver;
         SilentOtExtReceiver otReceiver;
+        
 
     public:
-        void seqopti_on() {sspmtReceiver.seqopti_on();};
+
+        void rpmt_on() {
+            sspmtReceiver.rpmt_on();
+            mRpmt = true;
+        }
 
         void initWithParam(uint32_t n, uint32_t nSender, 
             sspmtParams ssParams, oc::block seed) {

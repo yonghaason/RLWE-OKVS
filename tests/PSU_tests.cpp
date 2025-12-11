@@ -82,9 +82,14 @@ void psu_protocol_test(const oc::CLP& cmd)
         parms.initialize(n);
         cout << "\n-------Params-------" << endl;
         cout << "w: " << parms.bandWidth << endl;
-        cout << "m_ratio: " << parms.bandExpansion << endl;
+        cout << "m/n: " << parms.bandExpansion << endl;
+        auto numslots = parms.heNumSlots;
+        auto m = roundUpTo(parms.bandExpansion * n, numslots);
+        cout << "wrap: " << divCeil(parms.bandWidth * numslots, m) + 1 << endl;
+        cout << "seq_span: " << parms.span_blocks<< endl;
         cout << "--------------------" << endl;
     }
+
 
     vector<block> D;
     
@@ -131,7 +136,7 @@ void psu_protocol_test(const oc::CLP& cmd)
     }
 }
 
-void psu_protocol_opti_test(const oc::CLP& cmd)
+void del_psu_protocol_test(const oc::CLP& cmd)
 {       
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 18));
     u64 nt = cmd.getOr("nt", 1);
@@ -181,10 +186,10 @@ void psu_protocol_opti_test(const oc::CLP& cmd)
         
     PsuSender psuSender;
     PsuReceiver psuReceiver;
-    psuSender.seqopti_on();
     psuSender.setTimer(timer_s);
-    psuReceiver.seqopti_on();
+    psuSender.rpmt_on();
     psuReceiver.setTimer(timer_r);
+    psuReceiver.rpmt_on();
 
     psuSender.init(n, n, prng.get());
     psuReceiver.init(n, n, prng.get());
@@ -194,7 +199,11 @@ void psu_protocol_opti_test(const oc::CLP& cmd)
         parms.initialize(n);
         cout << "\n-------Params-------" << endl;
         cout << "w: " << parms.bandWidth << endl;
-        cout << "m_ratio: " << parms.bandExpansion << endl;
+        cout << "m/n: " << parms.bandExpansion << endl;
+        auto numslots = parms.heNumSlots;
+        auto m = roundUpTo(parms.bandExpansion * n, numslots);
+        cout << "wrap: " << divCeil(parms.bandWidth * numslots, m) + 1 << endl;
+        cout << "seq_span: " << parms.span_blocks<< endl;
         cout << "--------------------" << endl;
     }
 
