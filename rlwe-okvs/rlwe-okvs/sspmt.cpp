@@ -103,7 +103,7 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
     mLayerBins[l][bin] = i;
   }
 
-  bin_sizes.resize(mNumSlots);
+  last_layer_per_bin.resize(mNumSlots);
 
   for (uint32_t k = 0; k < mNumSlots; ++k) {
     auto &nonempty_layers = bin_layers[k];
@@ -115,7 +115,7 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
     for (auto &layeridx : nonempty_layers) {
       last_layer = max(layeridx, last_layer);
     }
-    bin_sizes[k] = last_layer + 1;
+    last_layer_per_bin[k] = last_layer + 1;
     BitVector oc_indicator(last_layer + 1);
     for (auto &layeridx : nonempty_layers) {
       oc_indicator[layeridx] = 1;
@@ -219,7 +219,7 @@ Proto SspmtSender::run(const std::vector<oc::block> &Y, Socket &chl) {
 
   co_await chl.send(decoded_in_he.size());
   co_await chl.send(move(sendstream.str()));
-  co_await chl.send(move(bin_sizes));
+  co_await chl.send(move(last_layer_per_bin));
   co_await chl.send(move(occupy_indicator_flat));
 
   setTimePoint("Sender::Serialize & Send");
@@ -399,19 +399,19 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
   string recvstring;
   co_await chl.recv(decoded_he_size);
   co_await chl.recvResize(recvstring);
-  co_await chl.recvResize(bin_sizes);
+  co_await chl.recvResize(last_layer_per_bin);
   auto len = 0;
   for (size_t i = 0; i < mNumSlots; i++) {
-    len += bin_sizes[i];
+    len += last_layer_per_bin[i];
   }
   oc::BitVector occupy_indicator_flat(len);
   co_await chl.recv(occupy_indicator_flat);
   auto offset = 0;
   occupy_indicator.resize(mNumSlots);
   for (size_t i = 0; i < mNumSlots; i++) {
-    occupy_indicator[i].append(occupy_indicator_flat.data(), bin_sizes[i],
+    occupy_indicator[i].append(occupy_indicator_flat.data(), last_layer_per_bin[i],
                                offset);
-    offset += bin_sizes[i];
+    offset += last_layer_per_bin[i];
   }
 
   stringstream recvstream;

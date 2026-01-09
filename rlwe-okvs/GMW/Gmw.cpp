@@ -7,7 +7,6 @@
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include <array>
 
-//for debugging
 using namespace std;
 
 namespace volePSI

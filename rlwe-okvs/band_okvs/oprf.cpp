@@ -93,6 +93,5 @@ namespace rlweOkvs
         // Random Oracle
         oc::mAesFixedKey.hashBlocks(FX, FX);
 
-        setTimePoint("Receiver::OPRF");
     }
 }

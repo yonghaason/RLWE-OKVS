@@ -6,6 +6,9 @@
 #include "cryptoTools/Network/Session.h"
 #include "cryptoTools/Circuit/BetaLibrary.h"
 #include "coproto/Socket/LocalAsyncSock.h"
+#ifdef COPROTO_ENABLE_BOOST
+#include <coproto/Socket/AsioSocket.h>
+#endif
 #include "cryptoTools/Common/Timer.h"
 #include <numeric>
 
@@ -20,16 +23,27 @@ using PRNG = oc::PRNG;
 
 void Gmw_iszero_test(const oc::CLP& cmd)
 {
-    auto sockets = LocalAsyncSocket::makePair();
-    
-
     block seed = oc::toBlock(cmd.getOr<u64>("s", 0));
     oc::PRNG prng(seed);
     
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
     u64 bs = cmd.getOr("b", 1ull << cmd.getOr("bb", 10));
     u64 keyBitLength = cmd.getOr("kbl", 64);
+    u64 nt = cmd.getOr("nt", 1);
     u64 keyByteLength = (keyBitLength + 7) / 8;
+
+    macoro::thread_pool pool0;
+    auto e0 = pool0.make_work();
+    pool0.create_threads(nt);
+    macoro::thread_pool pool1;
+    auto e1 = pool1.make_work();
+    pool1.create_threads(nt);
+
+    // auto socket = coproto::LocalAsyncSocket::makePair();
+    auto socket = coproto::AsioSocket::makePair();
+    socket[0].setExecutor(pool0);
+    socket[1].setExecutor(pool1);
+    
 
     Matrix<u8> in0, in1;
     in0.resize(n, keyByteLength, oc::AllocType::Uninitialized);
@@ -57,8 +71,8 @@ void Gmw_iszero_test(const oc::CLP& cmd)
     gmw0.setInput(0, in0);
     gmw1.setInput(0, in1);
 
-    auto p0 = gmw0.run(sockets[0]); 
-    auto p1 = gmw1.run(sockets[1]);
+    auto p0 = gmw0.run(socket[0]); 
+    auto p1 = gmw1.run(socket[1]);
     auto r = macoro::sync_wait(macoro::when_all_ready(std::move(p0), std::move(p1)));
     std::get<0>(r).result();
     std::get<1>(r).result();
@@ -96,8 +110,8 @@ void Gmw_iszero_test(const oc::CLP& cmd)
     if (cmd.isSet("v")) {
         std::cout << timer1 << std::endl;
         std::cout << timer2 << std::endl;
-        double recvByte = sockets[0].bytesReceived();
-        double sentByte = sockets[0].bytesSent();
+        double recvByte = socket[0].bytesReceived();
+        double sentByte = socket[0].bytesSent();
         std::cout 
         << recvByte/1024.0/1024.0 << " + "  << sentByte/1024.0/1024.0 
         << " = " << (recvByte + sentByte)/1024.0/1024.0 << " MB " 

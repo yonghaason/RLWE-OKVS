@@ -13,13 +13,13 @@ namespace volePSI
 {
 	void SilentTripleGen::init(u64 n, u64 batchSize, u64 numThreads, Mode mode, block seed)
 	{
-		mBatchSize = batchSize; // 2^19
+		mBatchSize = batchSize; 
 
 		u64 numBatchs = oc::divCeil(n, mBatchSize);
 		// mNumPer = oc::roundUpTo(oc::divCeil(n, numBatchs), 128);
 		mNumPer = mBatchSize; 
 		
-		mN = numBatchs * mNumPer; // 2^19 배수
+		mN = numBatchs * mNumPer; 
 		mMode = mode;
 		mPrng.SetSeed(seed);
 

@@ -42,7 +42,7 @@ namespace volePSI
 
             step *= 2;
         }
-        //cd.addOutputBundle()
+
         a.mWires.resize(1);
         cd.mOutputs.push_back(a);
 

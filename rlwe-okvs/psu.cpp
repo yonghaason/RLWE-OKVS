@@ -59,7 +59,9 @@ namespace rlweOkvs
         vector<block> FX;
         
         oprfreceiver.init(mN, mNsender, mPrng.get());
-        co_await oprfreceiver.run(X, FX, chl);        
+        co_await oprfreceiver.run(X, FX, chl); 
+        
+        setTimePoint("Receiver::OPRF");
            
         sspmtReceiver.init(mN, mNsender, mSsParams, mPrng.get());
         sspmtReceiver.setTimer(getTimer());

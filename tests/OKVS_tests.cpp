@@ -22,8 +22,9 @@ void encode_test(const oc::CLP& cmd)
     u32 w = cmd.getOr("w", 134);
     u32 m = ceil(cmd.getOr("ratio", 1.16)*n);
     u64 logp = cmd.getOr("logp", 60);
-    //Modulus p(PlainModulus::Batching(8192, logp));
-    Modulus p(2);
+    // Modulus p(2);
+    Modulus p(PlainModulus::Batching(8192, logp));
+    
     if (logp != 1)
         p = Modulus(PlainModulus::Batching(8192, logp));
 
@@ -215,8 +216,8 @@ void width_test(const oc::CLP& cmd)
              << trials_total; 
     const std::string fname = fname_os.str();
 
-    u32 m = roundUpTo(m_ratio*n, 8192);  // t_s = 2^13 
-    //u32 m = m_ratio*n;  // t_s = 2^13 
+    u32 m = roundUpTo(m_ratio*n, 8192); 
+    //u32 m = m_ratio*n; 
 
     cout << "m : " << m << endl;
 

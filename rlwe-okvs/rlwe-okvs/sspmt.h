@@ -18,16 +18,6 @@ namespace rlweOkvs
     using Proto = coproto::task<>;
     using Socket = coproto::Socket;
     
-    // TODO: Predefine sspmt params in another header,
-    // choose among them according to input size only.
-    // struct sspmtParams {
-    //     u32 heNumSlots = 1 << 13;
-    //     std::vector<int> heCoeffModulus = {40, 40, 58, 50};
-    //     u32 hePlainModulusBits = 60;
-    //     u32 bandWidth = 134;
-    //     double bandExpansion = 1.16;
-    // };
-
     struct sspmtParams {
         u32 heNumSlots = 1 << 13;
         std::vector<int> heCoeffModulus;
@@ -40,15 +30,13 @@ namespace rlweOkvs
                 case (1ull << 16):
                     heCoeffModulus = {40, 34, 55, 50};
                     hePlainModulusBits = 56;
-                    bandWidth = 21;
-                    bandExpansion = 2.9;
-                    span_blocks = 5;
+                    bandWidth = 37;
+                    bandExpansion = 1.7;
+                    span_blocks = 9;
                     break;
                 case (1ull << 18):
                     heCoeffModulus = {40, 36, 57, 50};
                     hePlainModulusBits = 58;
-                    // bandWidth = 73;
-                    // bandExpansion = 1.3;
                     bandWidth = 52;
                     bandExpansion = 1.5;
                     span_blocks = 13;
@@ -56,24 +44,14 @@ namespace rlweOkvs
                 case (1ull << 20):
                     heCoeffModulus = {40, 38, 59, 50};
                     hePlainModulusBits = 60;
-                    // bandWidth = 53;
-                    // bandExpansion = 1.5;
-                    // bandWidth = 80;
-                    // bandExpansion = 1.3;
-                    bandWidth = 109;
+                    bandWidth = 113;
                     bandExpansion = 1.2;
-                    // bandWidth = 22;
-                    // bandExpansion = 2.9;
                     span_blocks = 20;                    
                     break;
                 case (1ull << 22):
                     heCoeffModulus = {40, 40, 58, 50};
-                    hePlainModulusBits = 60; // SEAL의 한계로 60을 써야 함.
-                    // bandWidth = 56;
-                    // bandExpansion = 1.5;
-                    // bandWidth = 88;
-                    // bandExpansion = 1.3;
-                    bandWidth = 116;
+                    hePlainModulusBits = 60; 
+                    bandWidth = 118;
                     bandExpansion = 1.2;
                     span_blocks = 30;
                     break;
@@ -107,7 +85,7 @@ namespace rlweOkvs
         std::vector<uint32_t> mLayerMinBlock;
         std::vector<uint32_t> mLayerMaxBlock;
         
-        std::vector<uint32_t> bin_sizes;
+        std::vector<uint32_t> last_layer_per_bin;
         oc::BitVector occupy_indicator_flat;
 
         std::vector<uint32_t> ot_idx;
@@ -129,13 +107,6 @@ namespace rlweOkvs
         void rpmt_on() {mRpmt = true;};
         auto get_ot_idx() {return ot_idx;};
         u32 getNumLayers() {return mNumLayers;};
-        u32 getMaxbinsize() {
-            u32 maxbinsize = 0;
-            for (size_t i = 0; i < bin_sizes.size(); i++){
-                maxbinsize = std::max(bin_sizes[i], maxbinsize);
-            }
-            return maxbinsize;
-        }
 
         Proto run(
             const std::vector<oc::block> &Y, 
@@ -168,7 +139,7 @@ namespace rlweOkvs
 
         uint64_t mIndicatorStr;
 
-        std::vector<uint32_t> bin_sizes;
+        std::vector<uint32_t> last_layer_per_bin;
         std::vector<oc::BitVector> occupy_indicator;
 
         bool mRpmt = false;
