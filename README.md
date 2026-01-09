@@ -1,4 +1,4 @@
-### Build
+### Build and Run
 
 The library can be cloned and built with networking support as
 ```
@@ -15,3 +15,15 @@ cd ../..
 cmake -S . -B build
 cmake --build build
 ```
+
+This will generate `run` executable in `build` directory. 
+
+To run (DEL-free) PSU with set size n = 2^20, 
+```
+./run -u 7 -nn 20
+```
+To see other implementations,
+```
+./run -list
+```
+and refer cpp files in the `test` directory.
