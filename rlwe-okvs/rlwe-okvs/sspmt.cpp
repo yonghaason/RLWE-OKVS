@@ -510,8 +510,8 @@ void SspmtReceiver::decrypt(const std::vector<seal::Ciphertext> &decoded_in_he,
   const size_t L = decoded_in_he.size();
   vector<Plaintext> ptxts(L);
 
-  //   cout << "Noise Budget: "
-  //    << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
+    cout << "Noise Budget: "
+     << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
 
   for (size_t i = 0; i < L; i++) {
     mDecryptor->decrypt(decoded_in_he[i], ptxts[i]);

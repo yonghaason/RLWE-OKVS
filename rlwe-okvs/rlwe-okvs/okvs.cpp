@@ -75,7 +75,6 @@ namespace rlweOkvs
 {
     PRNG prng;
     // Generate random-band matrix
-    
 #pragma GCC unroll 16 
     for (uint32_t i = 0; i < mN; i++) {
         prng.SetSeed(key[i] ^ seed);
@@ -85,6 +84,7 @@ namespace rlweOkvs
             bands_flat[i*mW + j] = barrett_reduce_64(bands_flat[i*mW + j], mModulus);
         }
     }
+    
     setTimePoint("OKVS: Generate Band");
 };
 
