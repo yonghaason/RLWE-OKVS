@@ -17,7 +17,9 @@ namespace rlweOkvs
         vector<block> FY;
         
         oprfSender.init(mN, mNreceiver, mPrng.get());
-        co_await oprfSender.run(Y, FY, chl);                    
+        co_await oprfSender.run(Y, FY, chl);   
+        
+        setTimePoint("Sender::OPRF");
         
         sspmtSender.init(mN, mNreceiver, mSsParams, mPrng.get());
         sspmtSender.setTimer(getTimer());

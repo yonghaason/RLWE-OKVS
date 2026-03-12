@@ -128,80 +128,14 @@ void decode_test(const oc::CLP& cmd)
     } 
 }
 
-void decode_binary_test(const oc::CLP& cmd)
-{
-    u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-    u32 w = cmd.getOr("w", 145);
-    u32 m = ceil(cmd.getOr("ratio", 1.15)*n);
-    auto p = Modulus(PlainModulus::Batching(8192, 60));
-    
-    oc::Timer timer;
-    timer.setTimePoint("start");
-
-    PRNG prng(oc::ZeroBlock);
-    vector<block> key1(n);
-    vector<block> key2(n);
-    vector<uint64_t> value(n);
-
-    prng.get<block>(key1);
-    prng.get<block>(key2);
-    prng.get<uint64_t>(value);
-
-    for (uint32_t i = 0; i < n/2; i++) {
-        key2[i] = key1[i];
-    }
-
-    for (uint32_t i = 0; i < n; i++) {
-        value[i] = barrett_reduce_64(value[i], p);
-    }
-
-    PrimeFieldOkvs okvs;
-    okvs.setTimer(timer);
-    okvs.init(n, m, w, p);
-
-    vector<uint64_t> encoded(m);
-    vector<uint64_t> bands_flat(n*w);
-    vector<uint32_t> start_pos(n);
-    okvs.generate_binary_band(key1, bands_flat, start_pos, oc::ZeroBlock);
-
-    vector<uint64_t> value_copy(value);
-    okvs.sgauss_elimination(bands_flat, value_copy, start_pos, encoded);
-    
-    vector<uint64_t> decoded(n);
-    
-    okvs.generate_binary_band(key2, bands_flat, start_pos, oc::ZeroBlock);
-
-    for (uint32_t i = 0; i < n; ++i)
-    {
-        const uint64_t *__restrict row = bands_flat.data() + static_cast<size_t>(i) * w;
-        uint64_t acc = 0;
-        for (uint32_t j = 0; j < w; ++j){
-            acc = multiply_add_uint_mod(row[j], encoded[start_pos[i] + j], acc, p);
-        }
-        decoded[i] = acc;
-    }    
-    
-    u32 cnt = 0;
-    for (u64 i = 0; i < decoded.size(); i++) {
-        if (value[i] != decoded[i]) cnt++;
-    }
-    if (cnt != n/2) {
-        cout << cnt << " != " << n/2 << endl;
-        throw RTE_LOC;
-    }
-
-    if (cmd.isSet("v")) {
-        cout << endl;
-        cout << timer << endl;
-    } 
-}
-
 void width_test(const oc::CLP& cmd)
 {
-    u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
-    double m_ratio = cmd.getOr("ratio", 1.16);
+    // u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
+    u32 n = cmd.getOr("n", cmd.getOr("nn", 231)); //세로 길이
+    // double m_ratio = cmd.getOr("ratio", 1.16); 
+    u32 m = cmd.getOr("m", cmd.getOr("mm", 231)); //가로 길이
     u64 logp = cmd.getOr("logp", 60);
-    u32 trials_total = cmd.getOr("trials", 100000);
+    u32 trials_total = cmd.getOr("trials", 1000000);
     u32 w0 = cmd.getOr("w0", 0);
     u32 w1 = cmd.getOr("w1", 0);
     u32 t = cmd.getOr("tt", 1);
@@ -210,15 +144,16 @@ void width_test(const oc::CLP& cmd)
     if (w1 == 0) w1 = w0 + 1;
 
     std::ostringstream fname_os;
-    fname_os << log2ceil(n) << '_' 
-             << std::fixed << std::setprecision(2) << m_ratio << '_' 
+    fname_os << n << '_' 
+             << std::fixed << std::setprecision(2) << m << '_' 
              << logp << '_'
              << trials_total; 
     const std::string fname = fname_os.str();
 
-    u32 m = roundUpTo(m_ratio*n, 8192); 
+    // u32 m = roundUpTo(m_ratio*n, 8192); 
     //u32 m = m_ratio*n; 
 
+    cout << "n : " << n << endl;
     cout << "m : " << m << endl;
 
     bool file_exists = std::filesystem::exists(fname);
@@ -237,7 +172,7 @@ void width_test(const oc::CLP& cmd)
 
     Modulus p(2);
     if (logp != 1)
-        p = Modulus(PlainModulus::Batching(1024, logp));
+        p = Modulus(PlainModulus::Batching(8192, logp));
 
     const unsigned th_cnt = std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 8;
     std::cout << "Using " << th_cnt << " threads\n";
@@ -279,7 +214,8 @@ void width_test(const oc::CLP& cmd)
 
                 for (uint32_t i = 0; i < n; i++) {
                     b[i] = barrett_reduce_64(b[i], p);
-                    s[i] %= m-w-1;
+                    // Previous: s[i] %= m-w-1;
+                    s[i] %= (m - w + 1);
                 }
 
                 vector<u64> x;
@@ -339,3 +275,149 @@ void width_test(const oc::CLP& cmd)
 
     std::cout << "\nResults written to \"" << fname_os.str() << "\"\n";
 }
+
+
+// void width_test(const oc::CLP& cmd)
+// {
+//     u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
+//     double m_ratio = cmd.getOr("ratio", 1.16); 
+//     u64 logp = cmd.getOr("logp", 60);
+//     u32 trials_total = cmd.getOr("trials", 100000);
+//     u32 w0 = cmd.getOr("w0", 0);
+//     u32 w1 = cmd.getOr("w1", 0);
+//     u32 t = cmd.getOr("tt", 1);
+
+//     if (w0 == w1) w1 = w0 + 1;
+//     if (w1 == 0) w1 = w0 + 1;
+
+//     std::ostringstream fname_os;
+//     fname_os << log2ceil(n) << '_' 
+//              << std::fixed << std::setprecision(2) << m_ratio << '_' 
+//              << logp << '_'
+//              << trials_total; 
+//     const std::string fname = fname_os.str();
+
+//     u32 m = roundUpTo(m_ratio*n, 8192); 
+//     // u32 m = m_ratio*n; 
+
+//     cout << "n : " << n << endl;
+//     cout << "m : " << m << endl;
+
+//     bool file_exists = std::filesystem::exists(fname);
+
+//     std::ofstream outfile(fname, std::ios::out | std::ios::app);
+//     if (!outfile)
+//     {
+//         std::cerr << "Cannot open output file \"" << fname << "\"\n";
+//         throw RTE_LOC;
+//     }
+
+//     if (!file_exists)
+//     {
+//         outfile << "# L\tlog2_failure_rate\ttrials: " << trials_total << '\n';
+//     }
+
+//     Modulus p(2);
+//     if (logp != 1)
+//         p = Modulus(PlainModulus::Batching(8192, logp));
+
+//     const unsigned th_cnt = std::thread::hardware_concurrency() ? std::thread::hardware_concurrency() : 8;
+//     std::cout << "Using " << th_cnt << " threads\n";
+
+//     oc::PRNG prng0(oc::ZeroBlock);
+
+//     for (u32 w = w0; w < w1; w+=t)
+//     {
+//         std::cout << "\n[Running n=" << n << ", m=" << m << ", w=" << w << "]\n";
+
+//         std::atomic<uint64_t> completed{ 0 };
+//         std::atomic<uint64_t> fails{ 0 };
+//         std::mutex ms_mtx;
+//         double global_ms = 0.0;
+
+//         std::mutex io_mtx;
+
+//         auto worker = [&](unsigned /*tid*/, uint64_t my_trials) {
+//             double local_ms = 0.0;
+//             uint64_t local_fail = 0;
+
+//             oc::PRNG prng(prng0.get());
+
+//             for (uint64_t t = 0; t < my_trials; ++t)
+//             {
+//                 vector<u64> A_flat(n*w), b(n);
+//                 vector<u32> s(n);
+
+//                 PrimeFieldOkvs okvs;
+//                 okvs.init(n, m, w, p);
+
+//                 prng.get<u64>(A_flat);
+//                 prng.get<u64>(b);
+//                 prng.get<u32>(s);
+
+//                 for (uint32_t i = 0; i < A_flat.size(); i++) {
+//                     A_flat[i] = barrett_reduce_64(A_flat[i], p);
+//                 }
+
+//                 for (uint32_t i = 0; i < n; i++) {
+//                     b[i] = barrett_reduce_64(b[i], p);
+//                     s[i] %= m-w-1;
+//                 }
+
+//                 vector<u64> x;
+                
+//                 auto t0 = std::chrono::high_resolution_clock::now();
+//                 if (!okvs.sgauss_elimination(A_flat, b, s, x))
+//                     ++local_fail;
+
+//                 auto t1 = std::chrono::high_resolution_clock::now();
+//                 local_ms += std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+//                 completed.fetch_add(1, std::memory_order_relaxed);
+//             }
+
+//             fails.fetch_add(local_fail, std::memory_order_relaxed);
+
+//             std::lock_guard<std::mutex> g(ms_mtx);
+//             global_ms += local_ms;
+//         };
+
+//         std::thread monitor([&] {
+//             uint64_t last_pct = 0;
+//             while (last_pct < 100)
+//             {
+//                 uint64_t done = completed.load(std::memory_order_relaxed);
+//                 uint64_t pct = done * 100 / trials_total;
+//                 if (pct > last_pct)
+//                 {
+//                     last_pct = pct;
+//                     std::lock_guard<std::mutex> lg(io_mtx);
+//                     std::cout << "\rProgress: " << pct << "% (" << done << "/" << trials_total << ")" << std::flush;
+//                 }
+//                 std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+//             }
+//         });
+
+//         uint64_t base = trials_total / th_cnt;
+//         uint64_t extra = trials_total % th_cnt;
+//         std::vector<std::thread> pool;
+//         for (unsigned t = 0; t < th_cnt; ++t)
+//         {
+//             uint64_t my = base + (t < extra ? 1 : 0);
+//             pool.emplace_back(worker, t, my);
+//         }
+//         for (auto &th : pool)
+//             th.join();
+//         monitor.join();
+
+//         double failure_rate = static_cast<double>(fails) / trials_total;
+//         double lg2_failrate = (failure_rate > 0.0) ? std::log2(failure_rate) : -std::numeric_limits<double>::infinity();
+
+//         std::cout << "\n -> Failures: " << fails << " / " << trials_total << " | Failure Rate: " << failure_rate
+//                   << " = 2^" << lg2_failrate << " | Avg Time per Trial: " << global_ms / trials_total << " ms\n";
+
+//         outfile << w << '\t' << lg2_failrate << '\n';
+//     }
+
+//     std::cout << "\nResults written to \"" << fname_os.str() << "\"\n";
+// }

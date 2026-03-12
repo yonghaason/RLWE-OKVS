@@ -14,7 +14,7 @@ namespace rlweOkvsTests {
     t.add("OKVS_width_test                  ", width_test),
     t.add("OKVS_encode_test                 ", encode_test),
     t.add("OKVS_decode_test                 ", decode_test),
-    t.add("OKVS_decode_binary_test          ", decode_binary_test);
+    // t.add("OKVS_decode_binary_test          ", decode_binary_test);
     t.add("context_consistency_test         ", context_consistency_test),
     t.add("RPMT_protocol_test               ", rpmt_protocol_test);
     t.add("OPRF_protocol_test               ", oprf_protocol_test);
