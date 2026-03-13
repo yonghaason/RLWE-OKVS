@@ -1,5 +1,8 @@
 #include "RPMT_tests.h"
-#include "rlwe-okvs/sspmt.h"
+#include "rlwe-okvs/rpmt.h"
+#ifdef COPROTO_ENABLE_BOOST
+#include <coproto/Socket/AsioSocket.h>
+#endif
 
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/CLP.h"
@@ -23,16 +26,19 @@ void rpmt_protocol_test(const oc::CLP& cmd)
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
     u64 nt = cmd.getOr("nt", 1);
 
-    // u64 logp = cmd.getOr("logp", 60);
-    // u64 numSlots = cmd.getOr("t_s", 1 << 13);
-    // u64 width = cmd.getOr("w", 134);
-    // double expansion_ratio = cmd.getOr("mratio", 1.16);
-
-    sspmtParams ssParams;
-    // ssParams.bandExpansion = expansion_ratio;
-    // ssParams.bandWidth = width;
-    // ssParams.hePlainModulusBits = logp;
-    // ssParams.heNumSlots = numSlots;
+    rpmtParams pmtParams;
+    pmtParams.initialize(n);
+    
+    if (cmd.isSet("v")) {
+        cout << "\n-------Params-------" << endl;
+        cout << "w: " << pmtParams.bandWidth << endl;
+        cout << "m/n: " << pmtParams.bandExpansion << endl;
+        auto numslots = pmtParams.heNumSlots;
+        auto m = roundUpTo(pmtParams.bandExpansion * n, numslots);
+        cout << "wrap: " << divCeil(pmtParams.bandWidth * numslots, m) + 1 << endl;
+        cout << "seq_span: " << pmtParams.span_blocks<< endl;
+        cout << "--------------------" << endl;
+    }
     
     PRNG prng;
     prng.SetSeed(oc::ZeroBlock);
@@ -62,39 +68,35 @@ void rpmt_protocol_test(const oc::CLP& cmd)
     auto e1 = pool1.make_work();
     pool1.create_threads(nt);
 
-    // auto socket = coproto::AsioSocket::makePair();
-    auto socket = coproto::LocalAsyncSocket::makePair();
+    auto socket = coproto::AsioSocket::makePair();
+    // auto socket = coproto::LocalAsyncSocket::makePair();
     socket[0].setExecutor(pool0);
     socket[1].setExecutor(pool1);
     
     oc::Timer timer_s;
     oc::Timer timer_r;
         
-    SspmtSender sspmtSender;
-    SspmtReceiver sspmtReceiver;
-    sspmtSender.setTimer(timer_s);
-    sspmtReceiver.setTimer(timer_r);
+    RpmtSender rpmtSender;
+    RpmtReceiver rpmtReceiver;
+    rpmtSender.setTimer(timer_s);
+    rpmtReceiver.setTimer(timer_r);
 
-    sspmtSender.init(n, n, ssParams, prng.get());
-    sspmtSender.rpmt_on();
-    sspmtReceiver.init(n, n, ssParams, prng.get());
-    sspmtReceiver.rpmt_on();
+    rpmtSender.init(n, n, pmtParams, prng.get());
+    rpmtReceiver.init(n, n, pmtParams, prng.get());
 
     oc::BitVector results;
     
     timer_s.setTimePoint("start");
     timer_r.setTimePoint("start");
 
-    for (u64 i = 0; i < 1; ++i) {
-        auto p0 = sspmtSender.run(Y, socket[0]);
-        auto p1 = sspmtReceiver.run(X, results, socket[1]);
+    auto p0 = rpmtSender.run(Y, socket[0]);
+    auto p1 = rpmtReceiver.run(X, results, socket[1]);
 
-        auto r = macoro::sync_wait(
-            macoro::when_all_ready(std::move(p0) | macoro::start_on(pool0),
-                                std::move(p1) | macoro::start_on(pool1)));
-        std::get<0>(r).result();
-        std::get<1>(r).result();
-    }
+    auto r = macoro::sync_wait(
+        macoro::when_all_ready(std::move(p0) | macoro::start_on(pool0),
+                            std::move(p1) | macoro::start_on(pool1)));
+    std::get<0>(r).result();
+    std::get<1>(r).result();
    
     u64 real = 0;
     std::unordered_set<oc::block> setX(X.begin(), X.end());
@@ -111,5 +113,10 @@ void rpmt_protocol_test(const oc::CLP& cmd)
         cout << endl;
         cout << timer_s << endl;
         cout << timer_r << endl;
-    } 
+
+        std::cout << "comm " << double(socket[0].bytesSent())/ 1024 / 1024 << " + "
+              << double(socket[1].bytesSent())/ 1024 / 1024 << " = "
+              << double(socket[0].bytesSent() + socket[1].bytesSent()) / 1024 / 1024
+              << "MB" << std::endl;
+    }
 }

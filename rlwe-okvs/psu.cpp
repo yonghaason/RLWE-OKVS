@@ -14,25 +14,12 @@ namespace rlweOkvs
         const std::vector<oc::block> &Y,
         Socket &chl)
     {
-        vector<block> FY;
-        
-        oprfSender.init(mN, mNreceiver, mPrng.get());
-        co_await oprfSender.run(Y, FY, chl);   
-        
-        setTimePoint("Sender::OPRF");
-        
-        sspmtSender.init(mN, mNreceiver, mSsParams, mPrng.get());
-        sspmtSender.setTimer(getTimer());
+        rpmtSender.init(mN, mNreceiver, mPmtParams, mPrng.get());
+        rpmtSender.setTimer(getTimer());
 
-        BitVector sspmt;
-        if (!mRpmt) {
-            co_await sspmtSender.run(FY, sspmt, chl);
-        }
-        else {
-            sspmt.resize(mN);
-            co_await sspmtSender.run(FY, chl);
-        }
-        auto ot_idx = sspmtSender.get_ot_idx();
+        co_await rpmtSender.run(Y, chl);
+
+        auto ot_idx = rpmtSender.get_ot_idx();
         
         auto comm = chl.bytesSent() + chl.bytesReceived();
                 
@@ -42,7 +29,7 @@ namespace rlweOkvs
         vector<block> otp(mN);
         
         for (size_t i = 0; i < mN; i++) {
-            otp[i] = rotMsgs[i][sspmt[i]] ^ Y[ot_idx[i]];
+            otp[i] = rotMsgs[i][0] ^ Y[ot_idx[i]];
         }
 
         co_await chl.send(std::move(otp));
@@ -58,21 +45,14 @@ namespace rlweOkvs
         std::vector<oc::block>& D, 
         Socket &chl)
     {
-        vector<block> FX;
-        
-        oprfreceiver.init(mN, mNsender, mPrng.get());
-        co_await oprfreceiver.run(X, FX, chl); 
-        
-        setTimePoint("Receiver::OPRF");
-           
-        sspmtReceiver.init(mN, mNsender, mSsParams, mPrng.get());
-        sspmtReceiver.setTimer(getTimer());
+        rpmtReceiver.init(mN, mNsender, mPmtParams, mPrng.get());
+        rpmtReceiver.setTimer(getTimer());
 
-        BitVector sspmt;
-        co_await sspmtReceiver.run(FX, sspmt, chl);
+        BitVector rpmt;
+        co_await rpmtReceiver.run(X, rpmt, chl);
         
         vector<block> rotMsgs(mNsender);
-        co_await otReceiver.receive(sspmt, rotMsgs, mPrng, chl);
+        co_await otReceiver.receive(rpmt, rotMsgs, mPrng, chl);
 
         vector<block> otp;
         co_await chl.recvResize(otp);

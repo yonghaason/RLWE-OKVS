@@ -8,6 +8,7 @@
 #include "coproto/coproto.h"
 
 #include "seal/seal.h"
+#include "../band_okvs/oprf.h"
 
 using namespace std;
 using namespace seal;
@@ -18,7 +19,7 @@ namespace rlweOkvs
     using Proto = coproto::task<>;
     using Socket = coproto::Socket;
     
-    struct sspmtParams {
+    struct rpmtParams {
         u32 heNumSlots = 1 << 13;
         std::vector<int> heCoeffModulus;
         u32 hePlainModulusBits;
@@ -69,10 +70,11 @@ namespace rlweOkvs
         }
     };
 
-    class SspmtSender: public oc::TimerAdapter
+    class RpmtSender: public oc::TimerAdapter
     {
         
         oc::PRNG mPrng;
+        OprfSender mOprfSender;
         Modulus mModulus;
         uint64_t mNumSlots;
         unique_ptr<Evaluator> mEvaluator;
@@ -98,7 +100,7 @@ namespace rlweOkvs
         
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
 
-        bool mRpmt = false;
+        bool mSharedOutput = false;
         uint64_t mOTeBatchSize = 1ull << 19; 
         
     public:
@@ -106,9 +108,9 @@ namespace rlweOkvs
     
         void init(
             uint32_t n, uint32_t nReceiver, 
-            sspmtParams ssParams, oc::block seed = oc::OneBlock);
+            rpmtParams rParams, oc::block seed = oc::OneBlock);
 
-        void rpmt_on() {mRpmt = true;};
+        void sharedOutputOn() {mSharedOutput = true;};
         auto get_ot_idx() {return ot_idx;};
         u32 getNumLayers() {return mNumLayers;};
 
@@ -124,14 +126,25 @@ namespace rlweOkvs
         void preprocess(
             const std::vector<oc::block> &Y);
 
+        Proto recv_encoded_chunks(
+            std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+            Socket &chl);
+
+        Proto send_decoded_chunks(
+            const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+            Socket &chl);
+
         void encrypted_decode(
             const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
-            std::vector<seal::Ciphertext> &decoded_in_he);
+            std::vector<seal::Ciphertext> &decoded_in_he,
+            uint32_t layerBegin,
+            uint32_t layerEnd);
     };
 
-    class SspmtReceiver: public oc::TimerAdapter
+    class RpmtReceiver: public oc::TimerAdapter
     {
         oc::PRNG mPrng;
+        OprfReceiver mOprfReceiver;
         Modulus mModulus;
         uint64_t mNumSlots;
         shared_ptr<SEALContext> mContext;
@@ -144,27 +157,31 @@ namespace rlweOkvs
         uint64_t mIndicatorStr;
 
         std::vector<uint32_t> last_layer_per_bin;
-        std::vector<oc::BitVector> occupy_indicator;
+        std::vector<std::vector<uint32_t>> mLayerToBins;
 
-        bool mRpmt = false;
+        bool mSharedOutput = false;
         uint64_t mOTeBatchSize = 1ull << 19;
         
 
     public:
         void init(
             uint32_t n, uint32_t nSender, 
-            sspmtParams ssParams, oc::block seed = oc::ZeroBlock);
+            rpmtParams rParams, oc::block seed = oc::ZeroBlock);
 
-        void rpmt_on() {mRpmt = true;};
+        void sharedOutputOn() {mSharedOutput = true;};
 
         Proto run(
             const std::vector<oc::block> &X, 
             oc::BitVector &results,
             Socket &chl);
 
-        void encode_and_encrypt(
-            const std::vector<oc::block> &X, 
-            stringstream &ctxtstream);    
+        Proto send_encoded_chunks(
+            const std::vector<oc::block> &X,
+            Socket &chl);
+
+        Proto recv_decoded_chunks(
+            std::vector<seal::Ciphertext> &decoded_in_he,
+            Socket &chl);
 
         void decrypt(
             const std::vector<seal::Ciphertext> &decoded_in_he, 

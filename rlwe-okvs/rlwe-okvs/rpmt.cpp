@@ -1,5 +1,6 @@
-#include "sspmt.h"
+#include "rpmt.h"
 
+#include <cstdlib>
 #include <memory>
 #include <set>
 
@@ -15,7 +16,33 @@ using namespace volePSI;
 
 namespace rlweOkvs
 {
-  void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing)
+  namespace
+  {
+    uint32_t chunkEnvOrDefault(const char *name, uint32_t fallback)
+    {
+      if (const char *value = std::getenv(name))
+      {
+        auto parsed = static_cast<uint32_t>(std::strtoul(value, nullptr, 10));
+        if (parsed > 0)
+        {
+          return parsed;
+        }
+      }
+      return fallback;
+    }
+
+    uint32_t encodedBatchChunk()
+    {
+      return chunkEnvOrDefault("RLWE_OKVS_ENCODED_BATCH_CHUNK", 8);
+    }
+
+    uint32_t decodedLayerChunk()
+    {
+      return chunkEnvOrDefault("RLWE_OKVS_DECODED_LAYER_CHUNK", 8);
+    }
+  }
+
+  void RpmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing)
   {
     std::vector<uint32_t> item_binidx(mN);
     uint32_t max_block = 0;
@@ -146,7 +173,7 @@ namespace rlweOkvs
     ot_idx.resize(mN);
     size_t idx = 0;
 
-    if (mRpmt)
+    if (!mSharedOutput)
     {
       for (size_t lay = 0; lay < mNumLayers; ++lay)
       {
@@ -183,7 +210,7 @@ namespace rlweOkvs
     }
   }
 
-  void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
+  void RpmtSender::init(uint32_t n, uint32_t nReceiver, rpmtParams ssParams,
                          oc::block seed)
   {
     EncryptionParameters parms(scheme_type::bgv);
@@ -212,57 +239,25 @@ namespace rlweOkvs
     mEvaluator = make_unique<Evaluator>(*mContext);
   };
 
-  Proto SspmtSender::run(const std::vector<oc::block> &Y, Socket &chl)
+  Proto RpmtSender::run(const std::vector<oc::block> &Y, Socket &chl)
   {
-    preprocess(Y);
+    std::vector<oc::block> FY;
+    mOprfSender.init(mN, mNreceiver, mPrng.get());
+    mOprfSender.setTimer(getTimer());
+    co_await mOprfSender.run(Y, FY, chl);
+    setTimePoint("Sender::OPRF");
 
-    SEALContext context = *mContext;
+    preprocess(FY);
 
-    string recvstring;
-    co_await chl.recvResize(recvstring);
-    cout << "Sender receives " << mNumBatch << " X " << mWrap
-         << " Ctxts of OKVS Encoding, " << recvstring.size() << " Bytes" << endl;
-
-    stringstream recvstream;
-    recvstream.write(recvstring.data(), recvstring.size());
-
-    vector<vector<Ciphertext>> encoded_in_he(mWrap);
-    for (size_t i = 0; i < mWrap; i++)
-    {
-      encoded_in_he[i].resize(mNumBatch);
-      for (size_t j = 0; j < mNumBatch; j++)
-      {
-        encoded_in_he[i][j].unsafe_load(context, recvstream);
-      }
-    }
-
-    setTimePoint("Sender::Recv ctxts & Serialize");
-
-    vector<Ciphertext> decoded_in_he;
-
-    encrypted_decode(encoded_in_he, decoded_in_he);
-
-    stringstream sendstream;
-    for (size_t i = 0; i < decoded_in_he.size(); i++)
-    {
-      decoded_in_he[i].save(sendstream);
-    }
-
-    cout << "Sender sends " << decoded_in_he.size() << " decoded ctxts, "
-         << sendstream.str().size() << " Bytes" << endl;
-
-    co_await chl.send(decoded_in_he.size());
-    co_await chl.send(move(sendstream.str()));
-    co_await chl.send(move(last_layer_per_bin));
-    co_await chl.send(move(occupy_indicator_flat));
-
-    setTimePoint("Sender::Serialize & Send");
+    vector<vector<Ciphertext>> encoded_in_he(mNumBatch);
+    co_await recv_encoded_chunks(encoded_in_he, chl);
+    co_await send_decoded_chunks(encoded_in_he, chl);
   }
 
-  Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
+  Proto RpmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
                          Socket &chl)
   {
-    assert(!mRpmt && "Sender obtains result only when ssPMT.");
+    assert(mSharedOutput && "Sender obtains result only when ssPMT.");
     co_await run(Y, chl);
 
     // GMW with maskings
@@ -289,7 +284,7 @@ namespace rlweOkvs
     setTimePoint("Sender::Online GMW");
   }
 
-  void SspmtSender::preprocess(const std::vector<oc::block> &Y)
+  void RpmtSender::preprocess(const std::vector<oc::block> &Y)
   {
     PrimeFieldOkvs okvs;
     // okvs.setTimer(getTimer());
@@ -327,18 +322,23 @@ namespace rlweOkvs
 
     const uint64_t *bands = bands_flat.data();
 
-    ptxts_diags.resize(mWrap);
-    for (size_t k = 0; k < mWrap; ++k)
+    ptxts_diags.resize(mNumLayers);
+    for (size_t i = 0; i < mNumLayers; ++i)
     {
-      ptxts_diags[k].resize(mNumLayers * mNumBatch);
+      ptxts_diags[i].resize(static_cast<size_t>(mNumBatch) * mWrap);
     }
 
     std::vector<uint64_t> plainVec(mNumSlots, 0);
+    std::vector<BinMeta> layer_meta;
+    layer_meta.reserve(mNumSlots);
+    std::vector<uint32_t> row_counts(B_CHUNK);
+    std::vector<uint32_t> row_offsets(B_CHUNK + 1);
+    std::vector<uint32_t> write_ptr(B_CHUNK + 1);
+    std::vector<Contrib> flat_contribs;
 
     for (uint32_t i = 0; i < mNumLayers; ++i)
     {
-      std::vector<BinMeta> layer_meta;
-      layer_meta.reserve(mNumSlots);
+      layer_meta.clear();
 
       for (uint32_t bin = 0; bin < mNumSlots; ++bin)
       {
@@ -361,7 +361,7 @@ namespace rlweOkvs
             std::min<uint32_t>(Bmax, chunk_begin + B_CHUNK - 1);
         const uint32_t chunk_len = chunk_end - chunk_begin + 1;
 
-        std::vector<uint32_t> row_counts(chunk_len, 0);
+        std::fill_n(row_counts.begin(), chunk_len, 0);
 
         // pass 1: count
         for (const auto &bm : layer_meta)
@@ -381,14 +381,14 @@ namespace rlweOkvs
           }
         }
 
-        std::vector<uint32_t> row_offsets(chunk_len + 1, 0);
+        row_offsets[0] = 0;
         for (uint32_t row = 0; row < chunk_len; ++row)
         {
           row_offsets[row + 1] = row_offsets[row] + row_counts[row];
         }
 
-        std::vector<Contrib> flat_contribs(row_offsets[chunk_len]);
-        std::vector<uint32_t> write_ptr = row_offsets;
+        flat_contribs.resize(row_offsets[chunk_len]);
+        std::copy_n(row_offsets.begin(), chunk_len + 1, write_ptr.begin());
 
         // pass 2: fill
         for (const auto &bm : layer_meta)
@@ -420,7 +420,7 @@ namespace rlweOkvs
           if (k >= mWrap)
             continue;
 
-          const size_t outIdx = static_cast<size_t>(i) * mNumBatch + j;
+          const size_t outIdx = static_cast<size_t>(j) * mWrap + k;
 
           const uint32_t begin = row_offsets[row];
           const uint32_t end = row_offsets[row + 1];
@@ -431,7 +431,7 @@ namespace rlweOkvs
             plainVec[cv.first] = cv.second;
           }
 
-          mBatchEncoder->encode(plainVec, ptxts_diags[k][outIdx]);
+          mBatchEncoder->encode(plainVec, ptxts_diags[i][outIdx]);
 
           for (uint32_t t = begin; t < end; ++t)
           {
@@ -445,19 +445,93 @@ namespace rlweOkvs
     setTimePoint("Sender::HE Encode");
   }
 
-  void SspmtSender::encrypted_decode(
-      const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
-      std::vector<seal::Ciphertext> &decoded_in_he)
+  Proto RpmtSender::recv_encoded_chunks(
+      std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+      Socket &chl)
   {
-    decoded_in_he.resize(mNumLayers);
+    SEALContext context = *mContext;
+    size_t recvBytes = 0;
+    string recvstring;
+    stringstream recvstream;
 
-    for (size_t i = 0; i < mNumLayers; ++i)
+    const uint32_t chunkSize = encodedBatchChunk();
+    for (uint32_t jBegin = 0; jBegin < mNumBatch; jBegin += chunkSize)
+    {
+      const uint32_t jEnd = std::min<uint32_t>(mNumBatch, jBegin + chunkSize);
+      co_await chl.recvResize(recvstring);
+      recvBytes += recvstring.size();
+
+      recvstream.clear();
+      recvstream.str(recvstring);
+
+      for (uint32_t j = jBegin; j < jEnd; ++j)
+      {
+        encoded_in_he[j].resize(mWrap);
+        for (uint32_t k = 0; k < mWrap; ++k)
+        {
+          encoded_in_he[j][k].unsafe_load(context, recvstream);
+        }
+      }
+    }
+
+    cout << "Sender receives " << mNumBatch << " X " << mWrap
+         << " Ctxts of OKVS Encoding, " << recvBytes << " Bytes" << endl;
+
+    setTimePoint("Sender::Recv ctxts & Serialize");
+  }
+
+  Proto RpmtSender::send_decoded_chunks(
+      const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+      Socket &chl)
+  {
+    co_await chl.send(mNumLayers);
+
+    size_t sentBytes = 0;
+    std::vector<Ciphertext> decoded_chunk;
+    stringstream sendstream;
+    const uint32_t chunkSize = decodedLayerChunk();
+    for (uint32_t layerBegin = 0; layerBegin < mNumLayers; layerBegin += chunkSize)
+    {
+      const uint32_t layerEnd =
+          std::min<uint32_t>(mNumLayers, layerBegin + chunkSize);
+
+      encrypted_decode(encoded_in_he, decoded_chunk, layerBegin, layerEnd);
+
+      sendstream.clear();
+      sendstream.str("");
+      for (size_t i = 0; i < decoded_chunk.size(); ++i)
+      {
+        decoded_chunk[i].save(sendstream);
+      }
+
+      auto payload = sendstream.str();
+      sentBytes += payload.size();
+      co_await chl.send(move(payload));
+    }
+
+    cout << "Sender sends " << mNumLayers << " decoded ctxts, "
+         << sentBytes << " Bytes" << endl;
+
+    co_await chl.send(move(last_layer_per_bin));
+    co_await chl.send(move(occupy_indicator_flat));
+
+    setTimePoint("Sender::Encrypted OKVS Decoding & Send Back");
+  }
+
+  void RpmtSender::encrypted_decode(
+      const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+      std::vector<seal::Ciphertext> &decoded_in_he,
+      uint32_t layerBegin,
+      uint32_t layerEnd)
+  {
+    decoded_in_he.resize(layerEnd - layerBegin);
+
+    for (uint32_t i = layerBegin; i < layerEnd; ++i)
     {
       bool initialized = false;
       Ciphertext tmp;
-      Ciphertext &out = decoded_in_he[i];
+      Ciphertext &out = decoded_in_he[i - layerBegin];
 
-      const size_t idx_base = i * mNumBatch;
       const uint32_t Bmin = mLayerMinBlock[i];
       const uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
 
@@ -491,35 +565,34 @@ namespace rlweOkvs
           continue;
         }
 
-        const size_t idx = idx_base + j;
-
         uint32_t k = k_begin;
 
         if (!initialized)
         {
-          mEvaluator->multiply_plain(encoded_in_he[k][j], ptxts_diags[k][idx], out);
+          const size_t diag_idx = static_cast<size_t>(j) * mWrap + k;
+          mEvaluator->multiply_plain(encoded_in_he[j][k], ptxts_diags[i][diag_idx], out);
           initialized = true;
           ++k;
         }
 
         for (; k <= k_end; ++k)
         {
-          mEvaluator->multiply_plain(encoded_in_he[k][j], ptxts_diags[k][idx], tmp);
+          const size_t diag_idx = static_cast<size_t>(j) * mWrap + k;
+          mEvaluator->multiply_plain(encoded_in_he[j][k], ptxts_diags[i][diag_idx], tmp);
           mEvaluator->add_inplace(out, tmp);
         }
       }
 
-      if (!mRpmt)
+      if (mSharedOutput)
       {
         mEvaluator->add_plain_inplace(out, ptxts_mask[i]);
       }
 
       mEvaluator->mod_switch_to_next_inplace(out);
     }
-    setTimePoint("Sender::Encrypted OKVS Decoding");
   }
 
-  void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
+  void RpmtReceiver::init(uint32_t n, uint32_t nSender, rpmtParams ssParams,
                            oc::block seed)
   {
     EncryptionParameters parms(scheme_type::bgv);
@@ -552,18 +625,20 @@ namespace rlweOkvs
     mDecryptor = make_unique<Decryptor>(*mContext, secret_key);
   };
 
-  Proto SspmtReceiver::run(const std::vector<oc::block> &X,
+  Proto RpmtReceiver::run(const std::vector<oc::block> &X,
                            oc::BitVector &results, Socket &chl)
   {
-    stringstream sendstream;
-    encode_and_encrypt(X, sendstream);
-    co_await chl.send(move(sendstream.str()));
-    setTimePoint("Receiver::Serialize & Send");
+    std::vector<oc::block> FX;
+    mOprfReceiver.init(mN, mNsender, mPrng.get());
+    mOprfReceiver.setTimer(getTimer());
+    co_await mOprfReceiver.run(X, FX, chl);
+    setTimePoint("Receiver::OPRF");
 
-    size_t decoded_he_size;
-    string recvstring;
-    co_await chl.recv(decoded_he_size);
-    co_await chl.recvResize(recvstring);
+    co_await send_encoded_chunks(FX, chl);
+
+    vector<Ciphertext> decoded_in_he;
+    co_await recv_decoded_chunks(decoded_in_he, chl);
+
     co_await chl.recvResize(last_layer_per_bin);
     auto len = 0;
     for (size_t i = 0; i < mNumSlots; i++)
@@ -573,30 +648,24 @@ namespace rlweOkvs
     oc::BitVector occupy_indicator_flat(len);
     co_await chl.recv(occupy_indicator_flat);
     auto offset = 0;
-    occupy_indicator.resize(mNumSlots);
+    mLayerToBins.clear();
+    mLayerToBins.resize(decoded_in_he.size());
     for (size_t i = 0; i < mNumSlots; i++)
     {
-      occupy_indicator[i].append(occupy_indicator_flat.data(), last_layer_per_bin[i],
-                                 offset);
+      for (uint32_t layer = 0; layer < last_layer_per_bin[i]; ++layer)
+      {
+        if (occupy_indicator_flat[offset + layer])
+        {
+          mLayerToBins[layer].push_back(static_cast<uint32_t>(i));
+        }
+      }
       offset += last_layer_per_bin[i];
-    }
-
-    stringstream recvstream;
-    recvstream.write(recvstring.data(), recvstring.size());
-
-    setTimePoint("Receiver::Recv back and Serialize");
-
-    vector<Ciphertext> decoded_in_he(decoded_he_size);
-    SEALContext context = *mContext;
-    for (size_t i = 0; i < decoded_he_size; i++)
-    {
-      decoded_in_he[i].unsafe_load(context, recvstream);
     }
 
     vector<uint64_t> dec_results;
     decrypt(decoded_in_he, dec_results);
 
-    if (mRpmt)
+    if (!mSharedOutput)
     {
       results.resize(mNsender);
       for (size_t i = 0; i < mNsender; i++)
@@ -633,8 +702,8 @@ namespace rlweOkvs
     }
   }
 
-  void SspmtReceiver::encode_and_encrypt(const std::vector<oc::block> &X,
-                                         stringstream &ctxtstream)
+  Proto RpmtReceiver::send_encoded_chunks(const std::vector<oc::block> &X,
+                                          Socket &chl)
   {
     mIndicatorStr =
         seal::util::barrett_reduce_64(mPrng.get<uint64_t>(), mModulus);
@@ -662,29 +731,72 @@ namespace rlweOkvs
 
     vector<uint64_t> plainVec(mNumSlots);
     Plaintext ptxt;
+    stringstream ctxtstream;
 
-    for (size_t k = 0; k < mWrap; ++k)
+    const uint32_t chunkSize = encodedBatchChunk();
+    for (uint32_t jBegin = 0; jBegin < mNumBatch; jBegin += chunkSize)
     {
-      auto lastIdx = (k > 0) ? mNumBatch - 1 : mNumBatch;
-      for (uint32_t i = 0; i < lastIdx; ++i)
+      const uint32_t jEnd = std::min<uint32_t>(mNumBatch, jBegin + chunkSize);
+      ctxtstream.clear();
+      ctxtstream.str("");
+
+      for (uint32_t j = jBegin; j < jEnd; ++j)
       {
-        std::copy_n(&encoded[i * mNumSlots + k], mNumSlots, plainVec.data());
-        mBatchEncoder->encode(plainVec, ptxt);
-        mEncryptor->encrypt_symmetric(ptxt).save(ctxtstream);
+        for (uint32_t k = 0; k < mWrap; ++k)
+        {
+          if (j == mNumBatch - 1 && k > 0)
+          {
+            std::copy_n(&encoded[j * mNumSlots + k], mNumSlots - k, plainVec.data());
+            std::copy_n(&encoded[0], k, plainVec.data() + mNumSlots - k);
+          }
+          else
+          {
+            std::copy_n(&encoded[j * mNumSlots + k], mNumSlots, plainVec.data());
+          }
+          mBatchEncoder->encode(plainVec, ptxt);
+          mEncryptor->encrypt_symmetric(ptxt).save(ctxtstream);
+        }
       }
-      if (k > 0)
+
+      auto payload = ctxtstream.str();
+      co_await chl.send(move(payload));
+    }
+
+    setTimePoint("Receiver::Encryption & Send");
+  }
+
+  Proto RpmtReceiver::recv_decoded_chunks(
+      std::vector<seal::Ciphertext> &decoded_in_he,
+      Socket &chl)
+  {
+    uint32_t decoded_he_size;
+    co_await chl.recv(decoded_he_size);
+
+    decoded_in_he.resize(decoded_he_size);
+    SEALContext context = *mContext;
+    string recvstring;
+    stringstream recvstream;
+
+    const uint32_t chunkSize = decodedLayerChunk();
+    for (uint32_t layerBegin = 0; layerBegin < decoded_he_size; layerBegin += chunkSize)
+    {
+      const uint32_t layerEnd =
+          std::min<uint32_t>(decoded_he_size, layerBegin + chunkSize);
+      co_await chl.recvResize(recvstring);
+
+      recvstream.clear();
+      recvstream.str(recvstring);
+
+      for (uint32_t i = layerBegin; i < layerEnd; ++i)
       {
-        std::copy_n(&encoded[lastIdx * mNumSlots + k], mNumSlots - k, plainVec.data());
-        std::copy_n(&encoded[0], k, plainVec.data() + mNumSlots - k);
-        mBatchEncoder->encode(plainVec, ptxt);
-        mEncryptor->encrypt_symmetric(ptxt).save(ctxtstream);
+        decoded_in_he[i].unsafe_load(context, recvstream);
       }
     }
 
-    setTimePoint("Receiver::Encryption");
+    setTimePoint("Receiver::Recv back and Serialize");
   }
 
-  void SspmtReceiver::decrypt(const std::vector<seal::Ciphertext> &decoded_in_he,
+  void RpmtReceiver::decrypt(const std::vector<seal::Ciphertext> &decoded_in_he,
                               std::vector<uint64_t> &dec_results)
   {
     const size_t L = decoded_in_he.size();
@@ -706,15 +818,9 @@ namespace rlweOkvs
     {
       mBatchEncoder->decode(ptxts[i], decodeVec);
 
-      for (size_t j = 0; j < mNumSlots; j++)
+      for (auto bin : mLayerToBins[i])
       {
-        if (i < occupy_indicator[j].size())
-        {
-          if (occupy_indicator[j][i])
-          {
-            dec_results[idx++] = decodeVec[j];
-          }
-        }
+        dec_results[idx++] = decodeVec[bin];
       }
     }
     setTimePoint("Receiver::Decrypt");

@@ -1,5 +1,5 @@
 #include "RPMT_tests.h"
-#include "rlwe-okvs/sspmt.h"
+#include "rlwe-okvs/rpmt.h"
 
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/CLP.h"
@@ -72,15 +72,15 @@ void sequencing_test(const oc::CLP& cmd)
     timer.setTimePoint("start");
 
     for (size_t r = 0; r < repeat; r++) {
-        SspmtSender sspmtSender;
-        sspmtParams ssParams;
+        RpmtSender rpmtSender;
+        rpmtParams ssParams;
         ssParams.initialize(n);
         ssParams.span_blocks = span_blocks;
         ssParams.bandExpansion = m_ratio;
         ssParams.bandWidth = w;
 
-        sspmtSender.init(n, n, ssParams, prng.get());
-        sspmtSender.rpmt_on();
+        rpmtSender.init(n, n, ssParams, prng.get());
+        rpmtSender.sharedOutputOn();
 
         uint32_t m = ceil(ssParams.bandExpansion * n);
 
@@ -89,9 +89,9 @@ void sequencing_test(const oc::CLP& cmd)
             start_pos[i] = prng.get<uint32_t>() % m;
         }
       
-        sspmtSender.sequencing(start_pos);
+        rpmtSender.sequencing(start_pos);
 
-        span_avg += sspmtSender.getNumLayers();
+        span_avg += rpmtSender.getNumLayers();
 
         auto res = max_occupied_bin_modN(start_pos, ssParams.heNumSlots);
         maxbin_avg += res.max_load;
