@@ -58,8 +58,6 @@ namespace rlweOkvs
 
         // Random Oracle
         oc::mAesFixedKey.hashBlocks(FY, FY);
-
-        setTimePoint("Sender::OPRF");
     }
 
     Proto OprfReceiver::run(
