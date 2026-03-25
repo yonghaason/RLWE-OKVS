@@ -4,3 +4,6 @@
 [submodule "thirdparty/libOTe"]
 	path = thirdparty/libOTe
 	url = https://github.com/osu-crypto/libOTe
+[submodule "thirdparty/xxHash"]
+	path = thirdparty/xxHash
+	url = https://github.com/Cyan4973/xxHash.git

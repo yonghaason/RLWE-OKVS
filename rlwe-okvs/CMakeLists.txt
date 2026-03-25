@@ -1,6 +1,6 @@
 set(SRCS
     "rlwe-okvs/okvs.cpp"
-    "rlwe-okvs/sspmt.cpp"
+    "rlwe-okvs/rpmt.cpp"
     "band_okvs/band_okvs.cc"
     "band_okvs/band.cc"
     "band_okvs/oprf.cpp"
@@ -12,4 +12,4 @@ set(SRCS
 )
 
 add_library(RLWEOKVS STATIC ${SRCS})
-target_link_libraries(RLWEOKVS SEAL::seal oc::libOTe)
+target_link_libraries(RLWEOKVS SEAL::seal oc::libOTe xxhash)
