@@ -12,6 +12,8 @@ cmake --install build
 cd ../libOTe
 sudo apt install libtool
 python3 build.py --all --boost --sodium -DENABLE_CIRCUITS=ON --install=../install/libOTe
+cd ../xxHash
+make -j
 cd ../..
 cmake -S . -B build
 cmake --build build
