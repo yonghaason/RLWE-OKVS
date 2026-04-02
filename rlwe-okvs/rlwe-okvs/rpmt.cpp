@@ -217,6 +217,7 @@ namespace rlweOkvs
     mNumSlots = ssParams.heNumSlots;
     parms.set_poly_modulus_degree(mNumSlots);
 
+
     mN = n;
     mNreceiver = nReceiver;
     mM = roundUpTo(ssParams.bandExpansion * n, mNumSlots);
@@ -231,10 +232,11 @@ namespace rlweOkvs
 
     parms.set_coeff_modulus(
         CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
-    mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
+    mModulus = seal::util::get_primes(2*mNumSlots, ssParams.hePlainModulusBits, 2)[1];
+    // mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
     parms.set_plain_modulus(mModulus);
 
-    mContext = make_shared<SEALContext>(parms);
+    mContext = make_shared<SEALContext>(parms, true, sec_level_type::none);
     mBatchEncoder = make_unique<BatchEncoder>(*mContext);
     mEvaluator = make_unique<Evaluator>(*mContext);
   };
@@ -449,7 +451,7 @@ namespace rlweOkvs
       std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
       Socket &chl)
   {
-    SEALContext context = *mContext;
+    SEALContext context = *mContext;    
     size_t recvBytes = 0;
     string recvstring;
     stringstream recvstream;
@@ -609,10 +611,12 @@ namespace rlweOkvs
 
     parms.set_coeff_modulus(
         CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
-    mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
+
+    mModulus = seal::util::get_primes(2*mNumSlots, ssParams.hePlainModulusBits, 2)[1];
+    // mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
     parms.set_plain_modulus(mModulus);
 
-    mContext = make_shared<SEALContext>(parms);
+    mContext = make_shared<SEALContext>(parms, true, sec_level_type::none);
     KeyGenerator keygen(*mContext);
     SecretKey secret_key = keygen.secret_key();
     PublicKey public_key;
