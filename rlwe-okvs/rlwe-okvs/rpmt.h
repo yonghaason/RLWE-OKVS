@@ -37,7 +37,6 @@ namespace rlweOkvs
                     break;
                 case (1ull << 18):
                     heCoeffModulus = {54, 58, 60, 50};
-                    // heCoeffModulus = {58, 58, 58, 50};
                     hePlainModulusBits = 58;
                     bandWidth = 52;
                     bandExpansion = 1.5;
@@ -59,10 +58,10 @@ namespace rlweOkvs
                     span_blocks = 30;
                     break;
                 default:
-                    heCoeffModulus = {40, 40, 58, 60};
+                    heCoeffModulus = {58, 58, 60, 50};
                     hePlainModulusBits = 60;
-                    bandWidth = 21;
-                    bandExpansion = 2.9;
+                    bandWidth = 53;
+                    bandExpansion = 1.5;
                     break;
             }
         }

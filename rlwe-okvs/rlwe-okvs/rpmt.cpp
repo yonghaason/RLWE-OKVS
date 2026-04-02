@@ -232,7 +232,7 @@ namespace rlweOkvs
 
     parms.set_coeff_modulus(
         CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
-    mModulus = seal::util::get_primes(2*mNumSlots, ssParams.hePlainModulusBits, 2)[1];
+    mModulus = seal::util::get_primes(2*mNumSlots, ssParams.hePlainModulusBits, 4)[3];
     // mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
     parms.set_plain_modulus(mModulus);
 
@@ -612,7 +612,7 @@ namespace rlweOkvs
     parms.set_coeff_modulus(
         CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
 
-    mModulus = seal::util::get_primes(2*mNumSlots, ssParams.hePlainModulusBits, 2)[1];
+    mModulus = seal::util::get_primes(2*mNumSlots, ssParams.hePlainModulusBits, 4)[3];
     // mModulus = PlainModulus::Batching(mNumSlots, ssParams.hePlainModulusBits);
     parms.set_plain_modulus(mModulus);
 

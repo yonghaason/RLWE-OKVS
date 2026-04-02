@@ -18,6 +18,6 @@ namespace rlweOkvsTests {
     t.add("PSI_card_test                    ", psi_card_test);
     t.add("PSU_protocol_test                ", psu_protocol_test);
     t.add("PSI_card_sum_32_test                ", psi_card_sum_32_test);
-    // t.add("Sequencing_test                  ", sequencing_test);
+    t.add("Sequencing_test                  ", sequencing_test);
     });
 }
