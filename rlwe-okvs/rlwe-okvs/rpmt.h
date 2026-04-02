@@ -29,35 +29,33 @@ namespace rlweOkvs
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
-                    heCoeffModulus = {40, 34, 55, 50};
+                    heCoeffModulus = {40, 40, 48, 40, 50};
                     hePlainModulusBits = 56;
                     bandWidth = 37;
                     bandExpansion = 1.7;
                     span_blocks = 9;
                     break;
                 case (1ull << 18):
-                    heCoeffModulus = {40, 36, 57, 50};
+                    heCoeffModulus = {40, 44, 48, 40, 50};
+                    // heCoeffModulus = {58, 58, 58, 50};
                     hePlainModulusBits = 58;
                     bandWidth = 52;
                     bandExpansion = 1.5;
                     span_blocks = 13;
                     break;
                 case (1ull << 20):
-                    heCoeffModulus = {40, 48, 48, 50};
+                    heCoeffModulus = {58, 58, 60, 50};
+                    // heCoeffModulus = {40, 48, 48, 50};
                     hePlainModulusBits = 60;
-                    // bandWidth = 113;
-                    // bandExpansion = 1.2;
                     bandWidth = 53;
                     bandExpansion = 1.5;
-                    // bandWidth = 20;
-                    // bandExpansion = 2.7;
                     span_blocks = 20;                    
                     break;
                 case (1ull << 22):
-                    heCoeffModulus = {40, 40, 58, 50};
+                    heCoeffModulus = {44, 48, 48, 40, 50};
                     hePlainModulusBits = 60; 
-                    bandWidth = 118;
-                    bandExpansion = 1.2;
+                    bandWidth = 55;
+                    bandExpansion = 1.5;
                     span_blocks = 30;
                     break;
                 default:
