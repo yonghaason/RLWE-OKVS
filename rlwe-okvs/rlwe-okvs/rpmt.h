@@ -29,14 +29,14 @@ namespace rlweOkvs
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
-                    heCoeffModulus = {40, 40, 48, 40, 50};
+                    heCoeffModulus = {50, 58, 60, 50};
                     hePlainModulusBits = 56;
                     bandWidth = 37;
                     bandExpansion = 1.7;
                     span_blocks = 9;
                     break;
                 case (1ull << 18):
-                    heCoeffModulus = {40, 44, 48, 40, 50};
+                    heCoeffModulus = {54, 58, 60, 50};
                     // heCoeffModulus = {58, 58, 58, 50};
                     hePlainModulusBits = 58;
                     bandWidth = 52;
@@ -52,7 +52,7 @@ namespace rlweOkvs
                     span_blocks = 20;                    
                     break;
                 case (1ull << 22):
-                    heCoeffModulus = {44, 48, 48, 40, 50};
+                    heCoeffModulus = {60, 60, 60, 50};
                     hePlainModulusBits = 60; 
                     bandWidth = 55;
                     bandExpansion = 1.5;

@@ -85,4 +85,70 @@ namespace rlweOkvs
             std::vector<oc::block>& D, 
             Socket &chl);
     };
+
+    class PsiCardSumSender : public oc::TimerAdapter
+    {
+        uint32_t mN;
+        uint32_t mNreceiver;
+        oc::PRNG mPrng;
+        rpmtParams mPmtParams;
+
+        RpmtSender rpmtSender;
+        SilentOtExtSender otSender;
+
+    public:
+        void initWithParam(uint32_t n, uint32_t nReceiver, rpmtParams pmtParams, oc::block seed)
+        {
+            mN = n;
+            mNreceiver = nReceiver;
+            mPmtParams = pmtParams;
+            mPrng.SetSeed(seed);
+        }
+
+        void init(uint32_t n, uint32_t nReceiver, oc::block seed)
+        {
+            mN = n;
+            mNreceiver = nReceiver;
+            mPmtParams.initialize(nReceiver);
+            mPrng.SetSeed(seed);
+        }
+
+        Proto run(
+            const std::vector<oc::block>& Y,
+            const std::vector<oc::u32>& payloads,
+            Socket& chl);
+    };
+
+    class PsiCardSumReceiver : public oc::TimerAdapter
+    {
+        uint32_t mN;
+        uint32_t mNsender;
+        oc::PRNG mPrng;
+        rpmtParams mPmtParams;
+
+        RpmtReceiver rpmtReceiver;
+        SilentOtExtReceiver otReceiver;
+
+    public:
+        void initWithParam(uint32_t n, uint32_t nSender, rpmtParams pmtParams, oc::block seed)
+        {
+            mN = n;
+            mNsender = nSender;
+            mPmtParams = pmtParams;
+            mPrng.SetSeed(seed);
+        }
+
+        void init(uint32_t n, uint32_t nSender, oc::block seed)
+        {
+            mN = n;
+            mNsender = nSender;
+            mPmtParams.initialize(n);
+            mPrng.SetSeed(seed);
+        }
+
+        Proto run(
+            const std::vector<oc::block>& X,
+            oc::u64& psiCardSum,
+            Socket& chl);
+    };
 };

@@ -8,7 +8,7 @@ set(SRCS
     "GMW/Gmw.cpp"
     "GMW/SilentTripleGen.cpp"
     "GMW/TripleGen.cpp"
-    "psu.cpp"
+    "pso.cpp"
 )
 
 add_library(RLWEOKVS STATIC ${SRCS})

@@ -2,8 +2,7 @@ set(SRCS
 	OKVS_tests.cpp
     OPRF_tests.cpp
     SEAL_tests.cpp
-    RPMT_tests.cpp
-    PSU_tests.cpp
+    PSO_tests.cpp
     GMW_tests.cpp
     SEQ_tests.cpp
     UnitTests.cpp
