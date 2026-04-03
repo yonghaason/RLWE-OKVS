@@ -21,6 +21,18 @@ using namespace oc;
 using namespace seal;
 using namespace rlweOkvs;
 
+namespace
+{
+    u32 printed_wrap(const rpmtParams &params, u64 n)
+    {
+        auto numslots = params.heNumSlots;
+        auto m = roundUpTo(params.bandExpansion * n, numslots);
+        auto half_slots = static_cast<u32>(numslots / 2);
+        auto num_half_batch = static_cast<u32>(m / half_slots);
+        return 1 + divCeil(params.bandWidth, num_half_batch);
+    }
+}
+
 void rpmt_protocol_test(const oc::CLP& cmd)
 {       
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
@@ -33,9 +45,7 @@ void rpmt_protocol_test(const oc::CLP& cmd)
         cout << "\n-------Params-------" << endl;
         cout << "w: " << pmtParams.bandWidth << endl;
         cout << "m/n: " << pmtParams.bandExpansion << endl;
-        auto numslots = pmtParams.heNumSlots;
-        auto m = roundUpTo(pmtParams.bandExpansion * n, numslots);
-        cout << "wrap: " << divCeil(pmtParams.bandWidth * numslots, m) + 1 << endl;
+        cout << "wrap: " << printed_wrap(pmtParams, n) << endl;
         cout << "seq_span: " << pmtParams.span_blocks<< endl;
         cout << "--------------------" << endl;
     }

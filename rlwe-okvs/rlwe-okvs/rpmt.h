@@ -29,21 +29,21 @@ namespace rlweOkvs
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
-                    heCoeffModulus = {50, 58, 60, 50};
+                    heCoeffModulus = {50, 58, 60, 60};
                     hePlainModulusBits = 56;
                     bandWidth = 37;
                     bandExpansion = 1.7;
                     span_blocks = 9;
                     break;
                 case (1ull << 18):
-                    heCoeffModulus = {54, 58, 60, 50};
+                    heCoeffModulus = {54, 58, 60, 60};
                     hePlainModulusBits = 58;
                     bandWidth = 52;
                     bandExpansion = 1.5;
                     span_blocks = 13;
                     break;
                 case (1ull << 20):
-                    heCoeffModulus = {58, 58, 60, 50};
+                    heCoeffModulus = {58, 58, 60, 60};
                     // heCoeffModulus = {40, 48, 48, 50};
                     hePlainModulusBits = 60;
                     bandWidth = 53;
@@ -51,17 +51,18 @@ namespace rlweOkvs
                     span_blocks = 20;                    
                     break;
                 case (1ull << 22):
-                    heCoeffModulus = {60, 60, 60, 50};
+                    heCoeffModulus = {60, 60, 60, 60};
                     hePlainModulusBits = 60; 
                     bandWidth = 55;
                     bandExpansion = 1.5;
                     span_blocks = 30;
                     break;
                 default:
-                    heCoeffModulus = {58, 58, 60, 50};
+                    heCoeffModulus = {58, 58, 60, 60};
                     hePlainModulusBits = 60;
                     bandWidth = 53;
                     bandExpansion = 1.5;
+                    span_blocks = 20;   
                     break;
             }
         }
@@ -77,13 +78,16 @@ namespace rlweOkvs
         unique_ptr<Evaluator> mEvaluator;
         unique_ptr<BatchEncoder> mBatchEncoder;
         shared_ptr<SEALContext> mContext;
+        GaloisKeys mGaloisKeys;
         
-        uint32_t mN, mNreceiver, mM, mW, mNumBatch, mWrap;
+        uint32_t mN, mNreceiver, mM, mW, mNumBatch, mNumHalfBatch, mWrap;
+        uint32_t mHalfSlots;
         uint32_t mW_seq;
         uint32_t mNumLayers;
         uint32_t mSpanBlocks;
         std::vector<uint32_t> mItemToLayerIdx;
         std::vector<uint32_t> mItemToBlockIdx;
+        std::vector<uint32_t> mItemToSlotIdx;
         std::vector<std::vector<uint32_t>> mLayerBins;
         std::vector<uint32_t> mLayerMinBlock;
         std::vector<uint32_t> mLayerMaxBlock;
@@ -96,6 +100,9 @@ namespace rlweOkvs
         std::vector<seal::Plaintext> ptxts_mask;
         
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
+        std::vector<std::vector<seal::Plaintext>> ptxts_diags_swapped;
+        std::vector<std::vector<std::vector<seal::Plaintext>>> ptxts_diags_shifted;
+        std::vector<std::vector<std::vector<seal::Plaintext>>> ptxts_diags_shifted_swapped;
 
         bool mSharedOutput = false;
         uint64_t mOTeBatchSize = 1ull << 19; 
@@ -124,15 +131,18 @@ namespace rlweOkvs
             const std::vector<oc::block> &Y);
 
         Proto recv_encoded_chunks(
-            std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+            std::vector<seal::Ciphertext> &encoded_in_he,
             Socket &chl);
 
         Proto send_decoded_chunks(
-            const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+            const std::vector<seal::Ciphertext> &encoded_in_he,
             Socket &chl);
 
         void encrypted_decode(
-            const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+            const std::vector<seal::Ciphertext> &encoded_in_he,
+            const std::vector<seal::Ciphertext> &swapped_rows,
+            const std::vector<std::vector<seal::Ciphertext>> &shifted_rows,
+            const std::vector<std::vector<seal::Ciphertext>> &shifted_swapped_rows,
             std::vector<seal::Ciphertext> &decoded_in_he,
             uint32_t layerBegin,
             uint32_t layerEnd);
@@ -148,8 +158,10 @@ namespace rlweOkvs
         unique_ptr<Encryptor> mEncryptor;
         unique_ptr<BatchEncoder> mBatchEncoder;
         unique_ptr<Decryptor> mDecryptor;
+        GaloisKeys mGaloisKeys;
         
-        uint32_t mN, mNsender, mM, mW, mNumBatch, mWrap;
+        uint32_t mN, mNsender, mM, mW, mNumBatch, mNumHalfBatch, mWrap;
+        uint32_t mHalfSlots;
 
         uint64_t mIndicatorStr;
 

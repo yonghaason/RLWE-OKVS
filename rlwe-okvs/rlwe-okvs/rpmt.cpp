@@ -41,49 +41,54 @@ namespace rlweOkvs
       return chunkEnvOrDefault("RLWE_OKVS_DECODED_LAYER_CHUNK", 8);
     }
 
-    uint32_t activeBatchCountForWrap(uint32_t k, uint32_t numBatch, uint32_t width)
+    uint64_t totalEncodedCipherCount(uint32_t numBatch, uint32_t width, uint32_t maxWrap)
     {
-      const int64_t count =
-          static_cast<int64_t>(width) + (1 - static_cast<int64_t>(k)) * numBatch - 1;
-      if (count <= 0)
+      (void)width;
+      (void)maxWrap;
+      return numBatch;
+    }
+
+    uint32_t halfWrapCount(uint32_t width, uint32_t numHalfBatch)
+    {
+      if (width == 0)
+      {
+        return 1;
+      }
+      return 1 + divCeil(width, numHalfBatch);
+    }
+
+    uint32_t activeShiftBatchCount(
+        uint32_t carry, uint32_t width, uint32_t numHalfBatch, uint32_t numBatch)
+    {
+      if (carry == 0)
       {
         return 0;
       }
-      return std::min<uint32_t>(numBatch, static_cast<uint32_t>(count));
+
+      const int64_t activeHalfBlocks =
+          static_cast<int64_t>(width) - 1 - static_cast<int64_t>(carry - 1) * numHalfBatch;
+      if (activeHalfBlocks <= 0)
+      {
+        return 0;
+      }
+
+      return std::min<uint32_t>(
+          numBatch, static_cast<uint32_t>(divCeil(static_cast<uint32_t>(activeHalfBlocks), 2u)));
     }
 
-    uint32_t activeWrapCountForBatch(
-        uint32_t j, uint32_t numBatch, uint32_t width, uint32_t maxWrap)
-    {
-      uint32_t wraps = 0;
-      while (wraps < maxWrap && j < activeBatchCountForWrap(wraps, numBatch, width))
-      {
-        ++wraps;
-      }
-      return wraps;
-    }
-
-    uint64_t totalEncodedCipherCount(uint32_t numBatch, uint32_t width, uint32_t maxWrap)
-    {
-      uint64_t total = 0;
-      for (uint32_t k = 0; k < maxWrap; ++k)
-      {
-        total += activeBatchCountForWrap(k, numBatch, width);
-      }
-      return total;
-    }
   }
 
   void RpmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing)
   {
+    occupy_indicator_flat = oc::BitVector();
     std::vector<uint32_t> item_binidx(mN);
     uint32_t max_block = 0;
 
     for (uint32_t i = 0; i < mN; ++i)
     {
       uint32_t pos = start_pos_spacing[i];
-      uint32_t bin = pos % mNumSlots;
-      uint32_t blk = pos / mNumSlots;
+      uint32_t bin = pos % mHalfSlots;
+      uint32_t blk = pos / mHalfSlots;
 
       item_binidx[i] = bin;
       mItemToBlockIdx[i] = blk;
@@ -101,7 +106,7 @@ namespace rlweOkvs
     {
       uint32_t min_block;
       uint32_t max_block;
-      std::vector<uint8_t> used_bins;
+      std::vector<uint8_t> used_slots;
     };
     std::vector<Layer> layers;
 
@@ -110,14 +115,16 @@ namespace rlweOkvs
       auto &bucket = block_items[blk];
       for (uint32_t idx : bucket)
       {
-        uint32_t r = item_binidx[idx];     // bin (residue)
-        uint32_t j = mItemToBlockIdx[idx]; // block
+        uint32_t r = item_binidx[idx];     // half-row residue
+        uint32_t j = mItemToBlockIdx[idx]; // half-block
         bool placed = false;
         for (uint32_t li = 0; li < layers.size(); ++li)
         {
           Layer &L = layers[li];
+          const uint32_t top_slot = r;
+          const uint32_t bottom_slot = mHalfSlots + r;
 
-          if (L.used_bins[r])
+          if (L.used_slots[top_slot] && L.used_slots[bottom_slot])
           {
             continue;
           }
@@ -128,14 +135,12 @@ namespace rlweOkvs
 
           if (span <= mSpanBlocks)
           {
-            if (L.used_bins.empty())
-            {
-              L.used_bins.assign(mNumSlots, 0);
-            }
-            L.used_bins[r] = 1;
+            const uint32_t slot = L.used_slots[top_slot] ? bottom_slot : top_slot;
+            L.used_slots[slot] = 1;
             L.min_block = new_min;
             L.max_block = new_max;
             mItemToLayerIdx[idx] = li;
+            mItemToSlotIdx[idx] = slot;
             placed = true;
             break;
           }
@@ -146,10 +151,11 @@ namespace rlweOkvs
           Layer nl;
           nl.min_block = j;
           nl.max_block = j;
-          nl.used_bins.assign(mNumSlots, 0);
-          nl.used_bins[r] = 1;
+          nl.used_slots.assign(mNumSlots, 0);
+          nl.used_slots[r] = 1;
           layers.push_back(std::move(nl));
           mItemToLayerIdx[idx] = layers.size() - 1;
+          mItemToSlotIdx[idx] = r;
         }
       }
     }
@@ -163,7 +169,7 @@ namespace rlweOkvs
       mLayerMaxBlock[l] = layers[l].max_block;
     }
 
-    std::vector<std::vector<uint32_t>> bin_layers(mNumSlots);
+    std::vector<std::vector<uint32_t>> slot_layers(mNumSlots);
     mLayerBins.resize(mNumLayers);
     for (uint32_t l = 0; l < mNumLayers; l++)
     {
@@ -172,22 +178,23 @@ namespace rlweOkvs
 
     for (uint32_t i = 0; i < mN; ++i)
     {
-      uint32_t bin = item_binidx[i];
+      uint32_t slot = mItemToSlotIdx[i];
       uint32_t l = mItemToLayerIdx[i];
-      bin_layers[bin].push_back(l);
-      mLayerBins[l][bin] = i;
+      slot_layers[slot].push_back(l);
+      mLayerBins[l][slot] = i;
     }
 
     last_layer_per_bin.resize(mNumSlots);
 
     for (uint32_t k = 0; k < mNumSlots; ++k)
     {
-      auto &nonempty_layers = bin_layers[k];
+      auto &nonempty_layers = slot_layers[k];
       if (nonempty_layers.empty())
       {
+        last_layer_per_bin[k] = 0;
         continue;
       }
-      // last (nonempty) layer of k-th bin
+
       uint32_t last_layer = 0;
       for (auto &layeridx : nonempty_layers)
       {
@@ -249,18 +256,20 @@ namespace rlweOkvs
     mNumSlots = ssParams.heNumSlots;
     parms.set_poly_modulus_degree(mNumSlots);
 
-
     mN = n;
     mNreceiver = nReceiver;
     mM = roundUpTo(ssParams.bandExpansion * n, mNumSlots);
     mW = ssParams.bandWidth;
+    mHalfSlots = static_cast<uint32_t>(mNumSlots / 2);
     mNumBatch = mM / mNumSlots;
-    mWrap = divCeil(mW * mNumSlots, mM) + 1;
+    mNumHalfBatch = mM / mHalfSlots;
+    mWrap = halfWrapCount(mW, mNumHalfBatch);
     mSpanBlocks = ssParams.span_blocks;
     mPrng.SetSeed(seed);
 
     mItemToBlockIdx.resize(mN);
     mItemToLayerIdx.resize(mN);
+    mItemToSlotIdx.resize(mN);
 
     parms.set_coeff_modulus(
         CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
@@ -283,7 +292,15 @@ namespace rlweOkvs
 
     preprocess(FY);
 
-    vector<vector<Ciphertext>> encoded_in_he(mNumBatch);
+    string gk_string;
+    co_await chl.recvResize(gk_string);
+    cout << "Sender receives Galois keys, " << gk_string.size() << " Bytes" << endl;
+    stringstream gk_stream;
+    gk_stream.str(gk_string);
+    mGaloisKeys.load(*mContext, gk_stream);
+    setTimePoint("Sender::Recv Galois Keys");
+
+    vector<Ciphertext> encoded_in_he(mNumBatch);
     co_await recv_encoded_chunks(encoded_in_he, chl);
     co_await send_decoded_chunks(encoded_in_he, chl);
   }
@@ -334,143 +351,182 @@ namespace rlweOkvs
     for (uint32_t i = 0; i < mN; i++)
     {
       auto position = start_pos[i];
-      uint32_t q = position / mNumBatch;
-      uint32_t r = position % mNumBatch;
-      start_pos_spacing[i] = r * mNumSlots + q;
+      uint32_t q = position / mNumHalfBatch;
+      uint32_t r = position % mNumHalfBatch;
+      start_pos_spacing[i] = r * mHalfSlots + q;
     }
 
     sequencing(start_pos_spacing);
 
     setTimePoint("Sender::Sequencing");
 
-    struct BinMeta
+    struct SlotMeta
     {
-      uint32_t bin;
+      uint32_t slot;
       const uint64_t *band_ptr;
       uint32_t start_blk;
     };
 
-    using Contrib = std::pair<uint32_t, uint64_t>;
-
-    constexpr uint32_t B_CHUNK = 128;
-
     const uint64_t *bands = bands_flat.data();
 
+    ptxts_diags.clear();
+    ptxts_diags_swapped.clear();
+    ptxts_diags_shifted.clear();
+    ptxts_diags_shifted_swapped.clear();
     ptxts_diags.resize(mNumLayers);
+    ptxts_diags_swapped.resize(mNumLayers);
+    ptxts_diags_shifted.resize(mWrap > 1 ? mWrap - 1 : 0);
+    ptxts_diags_shifted_swapped.resize(mWrap > 1 ? mWrap - 1 : 0);
     for (size_t i = 0; i < mNumLayers; ++i)
     {
-      ptxts_diags[i].resize(static_cast<size_t>(mNumBatch) * mWrap);
+      ptxts_diags[i].resize(mNumBatch);
+      ptxts_diags_swapped[i].resize(mNumBatch);
+    }
+    for (uint32_t carry = 1; carry < mWrap; ++carry)
+    {
+      ptxts_diags_shifted[carry - 1].resize(mNumLayers);
+      ptxts_diags_shifted_swapped[carry - 1].resize(mNumLayers);
+      for (size_t i = 0; i < mNumLayers; ++i)
+      {
+        ptxts_diags_shifted[carry - 1][i].resize(mNumBatch);
+        ptxts_diags_shifted_swapped[carry - 1][i].resize(mNumBatch);
+      }
     }
 
-    std::vector<uint64_t> plainVec(mNumSlots, 0);
-    std::vector<BinMeta> layer_meta;
+    std::vector<SlotMeta> layer_meta;
     layer_meta.reserve(mNumSlots);
-    std::vector<uint32_t> row_counts(B_CHUNK);
-    std::vector<uint32_t> row_offsets(B_CHUNK + 1);
-    std::vector<uint32_t> write_ptr(B_CHUNK + 1);
-    std::vector<Contrib> flat_contribs;
+    std::vector<uint64_t> mainVec(mNumSlots, 0);
+    std::vector<uint64_t> swappedVec(mNumSlots, 0);
+    using Entry = std::pair<uint32_t, uint64_t>;
+    std::vector<std::vector<Entry>> mainEntries(mNumBatch);
+    std::vector<std::vector<Entry>> swappedEntries(mNumBatch);
+    std::vector<std::vector<std::vector<Entry>>> shiftedEntries(
+        mWrap > 1 ? mWrap - 1 : 0, std::vector<std::vector<Entry>>(mNumBatch));
+    std::vector<std::vector<std::vector<Entry>>> shiftedSwappedEntries(
+        mWrap > 1 ? mWrap - 1 : 0, std::vector<std::vector<Entry>>(mNumBatch));
 
     for (uint32_t i = 0; i < mNumLayers; ++i)
     {
       layer_meta.clear();
-
-      for (uint32_t bin = 0; bin < mNumSlots; ++bin)
+      for (uint32_t batch = 0; batch < mNumBatch; ++batch)
       {
-        uint32_t item = mLayerBins[i][bin];
-        if (item == UINT32_MAX)
-          continue;
+        mainEntries[batch].clear();
+        swappedEntries[batch].clear();
+      }
+      for (uint32_t carry = 1; carry < mWrap; ++carry)
+      {
+        const uint32_t activeBatchCount =
+            activeShiftBatchCount(carry, mW, mNumHalfBatch, mNumBatch);
+        for (uint32_t batch = 0; batch < activeBatchCount; ++batch)
+        {
+          shiftedEntries[carry - 1][batch].clear();
+          shiftedSwappedEntries[carry - 1][batch].clear();
+        }
+      }
 
-        layer_meta.push_back(BinMeta{
-            bin,
+      for (uint32_t slot = 0; slot < mNumSlots; ++slot)
+      {
+        uint32_t item = mLayerBins[i][slot];
+        if (item == UINT32_MAX)
+        {
+          continue;
+        }
+
+        layer_meta.push_back(SlotMeta{
+            slot,
             bands + static_cast<size_t>(item) * mW,
             mItemToBlockIdx[item]});
       }
 
-      uint32_t Bmin = mLayerMinBlock[i];
-      uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
-
-      for (uint32_t chunk_begin = Bmin; chunk_begin <= Bmax; chunk_begin += B_CHUNK)
+      for (const auto &sm : layer_meta)
       {
-        const uint32_t chunk_end =
-            std::min<uint32_t>(Bmax, chunk_begin + B_CHUNK - 1);
-        const uint32_t chunk_len = chunk_end - chunk_begin + 1;
-
-        std::fill_n(row_counts.begin(), chunk_len, 0);
-
-        // pass 1: count
-        for (const auto &bm : layer_meta)
+        const bool isTop = sm.slot < mHalfSlots;
+        const uint32_t rowBase = isTop ? 0 : mHalfSlots;
+        const uint32_t logicalBin = sm.slot - rowBase;
+        for (uint32_t w = 0; w < mW; ++w)
         {
-          const uint32_t start = bm.start_blk;
-          const uint32_t end = bm.start_blk + mW - 1;
+          const uint32_t totalHalfBlock = sm.start_blk + w;
+          const uint32_t blockCarry = totalHalfBlock / mNumHalfBatch;
+          const uint32_t halfBlock = totalHalfBlock - blockCarry * mNumHalfBatch;
+          const uint32_t batch = halfBlock / 2;
+          const uint64_t coeff = sm.band_ptr[w];
+          auto &entryList =
+              blockCarry == 0
+                  ? (((halfBlock & 1U) == 0)
+                         ? (isTop ? mainEntries[batch] : swappedEntries[batch])
+                         : (isTop ? swappedEntries[batch] : mainEntries[batch]))
+                  : (((halfBlock & 1U) == 0)
+                         ? (isTop ? shiftedEntries[blockCarry - 1][batch]
+                                  : shiftedSwappedEntries[blockCarry - 1][batch])
+                         : (isTop ? shiftedSwappedEntries[blockCarry - 1][batch]
+                                  : shiftedEntries[blockCarry - 1][batch]));
 
-          const uint32_t lo = std::max(start, chunk_begin);
-          const uint32_t hi = std::min(end, chunk_end);
+          entryList.push_back({rowBase + logicalBin, coeff});
+        }
+      }
 
-          if (lo > hi)
-            continue;
-
-          for (uint32_t B = lo; B <= hi; ++B)
+      for (uint32_t batch = 0; batch < mNumBatch; ++batch)
+      {
+        if (!mainEntries[batch].empty())
+        {
+          for (const auto &[slot, coeff] : mainEntries[batch])
           {
-            ++row_counts[B - chunk_begin];
+            mainVec[slot] = coeff;
+          }
+          mBatchEncoder->encode(mainVec, ptxts_diags[i][batch]);
+          for (const auto &[slot, coeff] : mainEntries[batch])
+          {
+            (void)coeff;
+            mainVec[slot] = 0;
           }
         }
-
-        row_offsets[0] = 0;
-        for (uint32_t row = 0; row < chunk_len; ++row)
+        if (!swappedEntries[batch].empty())
         {
-          row_offsets[row + 1] = row_offsets[row] + row_counts[row];
-        }
-
-        flat_contribs.resize(row_offsets[chunk_len]);
-        std::copy_n(row_offsets.begin(), chunk_len + 1, write_ptr.begin());
-
-        // pass 2: fill
-        for (const auto &bm : layer_meta)
-        {
-          const uint32_t start = bm.start_blk;
-          const uint32_t end = bm.start_blk + mW - 1;
-
-          const uint32_t lo = std::max(start, chunk_begin);
-          const uint32_t hi = std::min(end, chunk_end);
-
-          if (lo > hi)
-            continue;
-
-          for (uint32_t B = lo; B <= hi; ++B)
+          for (const auto &[slot, coeff] : swappedEntries[batch])
           {
-            const uint32_t row = B - chunk_begin;
-            const uint32_t w = B - start;
-            flat_contribs[write_ptr[row]++] = Contrib{bm.bin, bm.band_ptr[w]};
+            swappedVec[slot] = coeff;
+          }
+          mBatchEncoder->encode(swappedVec, ptxts_diags_swapped[i][batch]);
+          for (const auto &[slot, coeff] : swappedEntries[batch])
+          {
+            (void)coeff;
+            swappedVec[slot] = 0;
           }
         }
+      }
 
-        // materialize + encode
-        for (uint32_t row = 0; row < chunk_len; ++row)
+      for (uint32_t carry = 1; carry < mWrap; ++carry)
+      {
+        const uint32_t activeBatchCount =
+            activeShiftBatchCount(carry, mW, mNumHalfBatch, mNumBatch);
+        for (uint32_t batch = 0; batch < activeBatchCount; ++batch)
         {
-          const uint32_t B = chunk_begin + row;
-
-          const uint32_t k = B / mNumBatch;
-          const uint32_t j = B % mNumBatch;
-          if (k >= mWrap)
-            continue;
-
-          const size_t outIdx = static_cast<size_t>(j) * mWrap + k;
-
-          const uint32_t begin = row_offsets[row];
-          const uint32_t end = row_offsets[row + 1];
-
-          for (uint32_t t = begin; t < end; ++t)
+          if (!shiftedEntries[carry - 1][batch].empty())
           {
-            const auto &cv = flat_contribs[t];
-            plainVec[cv.first] = cv.second;
+            for (const auto &[slot, coeff] : shiftedEntries[carry - 1][batch])
+            {
+              mainVec[slot] = coeff;
+            }
+            mBatchEncoder->encode(mainVec, ptxts_diags_shifted[carry - 1][i][batch]);
+            for (const auto &[slot, coeff] : shiftedEntries[carry - 1][batch])
+            {
+              (void)coeff;
+              mainVec[slot] = 0;
+            }
           }
-
-          mBatchEncoder->encode(plainVec, ptxts_diags[i][outIdx]);
-
-          for (uint32_t t = begin; t < end; ++t)
+          if (!shiftedSwappedEntries[carry - 1][batch].empty())
           {
-            const auto &cv = flat_contribs[t];
-            plainVec[cv.first] = 0;
+            for (const auto &[slot, coeff] : shiftedSwappedEntries[carry - 1][batch])
+            {
+              swappedVec[slot] = coeff;
+            }
+            mBatchEncoder->encode(
+                swappedVec, ptxts_diags_shifted_swapped[carry - 1][i][batch]);
+            for (const auto &[slot, coeff] : shiftedSwappedEntries[carry - 1][batch])
+            {
+              (void)coeff;
+              swappedVec[slot] = 0;
+            }
           }
         }
       }
@@ -480,12 +536,11 @@ namespace rlweOkvs
   }
 
   Proto RpmtSender::recv_encoded_chunks(
-      std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+      std::vector<seal::Ciphertext> &encoded_in_he,
       Socket &chl)
   {
     SEALContext context = *mContext;    
     size_t recvBytes = 0;
-    uint64_t recvCtxts = 0;
     string recvstring;
     stringstream recvstream;
 
@@ -501,38 +556,60 @@ namespace rlweOkvs
 
       for (uint32_t j = jBegin; j < jEnd; ++j)
       {
-        encoded_in_he[j].resize(mWrap);
-        const uint32_t activeWraps = activeWrapCountForBatch(j, mNumBatch, mW, mWrap);
-        for (uint32_t k = 0; k < activeWraps; ++k)
-        {
-          encoded_in_he[j][k].unsafe_load(context, recvstream);
-          ++recvCtxts;
-        }
+        encoded_in_he[j].unsafe_load(context, recvstream);
       }
     }
 
-    cout << "Sender receives " << recvCtxts
+    cout << "Sender receives " << mNumBatch
          << " Ctxts of OKVS Encoding, " << recvBytes << " Bytes" << endl;
 
     setTimePoint("Sender::Recv ctxts & Serialize");
   }
 
   Proto RpmtSender::send_decoded_chunks(
-      const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+      const std::vector<seal::Ciphertext> &encoded_in_he,
       Socket &chl)
   {
     co_await chl.send(mNumLayers);
 
     size_t sentBytes = 0;
     std::vector<Ciphertext> decoded_chunk;
+    std::vector<Ciphertext> swapped_rows;
+    std::vector<std::vector<Ciphertext>> shifted_rows(mWrap > 1 ? mWrap - 1 : 0);
+    std::vector<std::vector<Ciphertext>> shifted_swapped_rows(mWrap > 1 ? mWrap - 1 : 0);
     stringstream sendstream;
+
+    swapped_rows.resize(mNumBatch);
+    for (uint32_t j = 0; j < mNumBatch; ++j)
+    {
+      mEvaluator->rotate_columns(encoded_in_he[j], mGaloisKeys, swapped_rows[j]);
+    }
+    for (uint32_t carry = 1; carry < mWrap; ++carry)
+    {
+      const uint32_t activeBatchCount =
+          activeShiftBatchCount(carry, mW, mNumHalfBatch, mNumBatch);
+      shifted_rows[carry - 1].resize(activeBatchCount);
+      shifted_swapped_rows[carry - 1].resize(activeBatchCount);
+      for (uint32_t j = 0; j < activeBatchCount; ++j)
+      {
+        mEvaluator->rotate_rows(
+            encoded_in_he[j], static_cast<int>(carry), mGaloisKeys,
+            shifted_rows[carry - 1][j]);
+        mEvaluator->rotate_columns(
+            shifted_rows[carry - 1][j], mGaloisKeys, shifted_swapped_rows[carry - 1][j]);
+      }
+    }
+    setTimePoint("Sender::Precompute Rotations");
+
     const uint32_t chunkSize = decodedLayerChunk();
     for (uint32_t layerBegin = 0; layerBegin < mNumLayers; layerBegin += chunkSize)
     {
       const uint32_t layerEnd =
           std::min<uint32_t>(mNumLayers, layerBegin + chunkSize);
 
-      encrypted_decode(encoded_in_he, decoded_chunk, layerBegin, layerEnd);
+      encrypted_decode(encoded_in_he, swapped_rows, shifted_rows,
+                       shifted_swapped_rows, decoded_chunk,
+                       layerBegin, layerEnd);
 
       sendstream.clear();
       sendstream.str("");
@@ -556,7 +633,10 @@ namespace rlweOkvs
   }
 
   void RpmtSender::encrypted_decode(
-      const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
+      const std::vector<seal::Ciphertext> &encoded_in_he,
+      const std::vector<seal::Ciphertext> &swapped_rows,
+      const std::vector<std::vector<seal::Ciphertext>> &shifted_rows,
+      const std::vector<std::vector<seal::Ciphertext>> &shifted_swapped_rows,
       std::vector<seal::Ciphertext> &decoded_in_he,
       uint32_t layerBegin,
       uint32_t layerEnd)
@@ -566,65 +646,54 @@ namespace rlweOkvs
     for (uint32_t i = layerBegin; i < layerEnd; ++i)
     {
       bool initialized = false;
-      Ciphertext tmp;
       Ciphertext &out = decoded_in_he[i - layerBegin];
-
-      const uint32_t Bmin = mLayerMinBlock[i];
-      const uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
 
       for (uint32_t j = 0; j < mNumBatch; ++j)
       {
-        // active k range for B = k*mNumBatch + j
-        if (Bmax < j)
-        {
-          continue;
-        }
+        Ciphertext prod;
 
-        uint32_t k_begin = 0;
-        if (Bmin > j)
+        auto accumulate = [&](const Ciphertext &src, const Plaintext &plain)
         {
-          k_begin = (Bmin - j + mNumBatch - 1) / mNumBatch; // ceil((Bmin-j)/mNumBatch)
-        }
+          if (plain.is_zero())
+          {
+            return;
+          }
 
-        if (k_begin >= mWrap)
+          mEvaluator->multiply_plain(src, plain, prod);
+          if (!initialized)
+          {
+            out = prod;
+            initialized = true;
+          }
+          else
+          {
+            mEvaluator->add_inplace(out, prod);
+          }
+        };
+
+        accumulate(encoded_in_he[j], ptxts_diags[i][j]);
+        accumulate(swapped_rows[j], ptxts_diags_swapped[i][j]);
+        for (uint32_t carry = 1; carry < mWrap; ++carry)
         {
-          continue;
+          if (j < shifted_rows[carry - 1].size() &&
+              !ptxts_diags_shifted[carry - 1][i][j].is_zero())
+          {
+            accumulate(shifted_rows[carry - 1][j], ptxts_diags_shifted[carry - 1][i][j]);
+          }
+          if (j < shifted_swapped_rows[carry - 1].size() &&
+              !ptxts_diags_shifted_swapped[carry - 1][i][j].is_zero())
+          {
+            accumulate(
+                shifted_swapped_rows[carry - 1][j],
+                ptxts_diags_shifted_swapped[carry - 1][i][j]);
+          }
         }
+      }
 
-        uint32_t k_end = (Bmax - j) / mNumBatch; // floor((Bmax-j)/mNumBatch)
-        if (k_end >= mWrap)
-        {
-          k_end = static_cast<uint32_t>(mWrap - 1);
-        }
-
-        if (k_begin > k_end)
-        {
-          continue;
-        }
-
-        const uint32_t activeWraps = activeWrapCountForBatch(j, mNumBatch, mW, mWrap);
-        if (k_begin >= activeWraps)
-        {
-          continue;
-        }
-        k_end = std::min<uint32_t>(k_end, activeWraps - 1);
-
-        uint32_t k = k_begin;
-
-        if (!initialized)
-        {
-          const size_t diag_idx = static_cast<size_t>(j) * mWrap + k;
-          mEvaluator->multiply_plain(encoded_in_he[j][k], ptxts_diags[i][diag_idx], out);
-          initialized = true;
-          ++k;
-        }
-
-        for (; k <= k_end; ++k)
-        {
-          const size_t diag_idx = static_cast<size_t>(j) * mWrap + k;
-          mEvaluator->multiply_plain(encoded_in_he[j][k], ptxts_diags[i][diag_idx], tmp);
-          mEvaluator->add_inplace(out, tmp);
-        }
+      if (!initialized)
+      {
+        out = encoded_in_he[0];
+        mEvaluator->sub_inplace(out, encoded_in_he[0]);
       }
 
       if (mSharedOutput)
@@ -647,8 +716,10 @@ namespace rlweOkvs
     mNsender = nSender;
     mM = roundUpTo(ssParams.bandExpansion * n, mNumSlots);
     mW = ssParams.bandWidth;
+    mHalfSlots = static_cast<uint32_t>(mNumSlots / 2);
     mNumBatch = mM / mNumSlots;
-    mWrap = divCeil(mW * mNumSlots, mM) + 1;
+    mNumHalfBatch = mM / mHalfSlots;
+    mWrap = halfWrapCount(mW, mNumHalfBatch);
     mPrng.SetSeed(seed);
 
     parms.set_coeff_modulus(
@@ -663,6 +734,13 @@ namespace rlweOkvs
     SecretKey secret_key = keygen.secret_key();
     PublicKey public_key;
     keygen.create_public_key(public_key);
+    std::vector<int> galois_steps;
+    galois_steps.push_back(0);
+    for (uint32_t step = 1; step < mWrap; ++step)
+    {
+      galois_steps.push_back(static_cast<int>(step));
+    }
+    keygen.create_galois_keys(galois_steps, mGaloisKeys);
 
     mEncryptor = make_unique<Encryptor>(*mContext, public_key);
     mEncryptor->set_secret_key(secret_key);
@@ -679,6 +757,13 @@ namespace rlweOkvs
     mOprfReceiver.setTimer(getTimer());
     co_await mOprfReceiver.run(X, FX, chl);
     setTimePoint("Receiver::OPRF");
+
+    stringstream gk_stream;
+    mGaloisKeys.save(gk_stream);
+    auto gk_payload = gk_stream.str();
+    cout << "Receiver sends Galois keys, " << gk_payload.size() << " Bytes" << endl;
+    co_await chl.send(std::move(gk_payload));
+    setTimePoint("Receiver::Send Galois Keys");
 
     co_await send_encoded_chunks(FX, chl);
 
@@ -767,9 +852,9 @@ namespace rlweOkvs
     vector<uint64_t> encoded_spacing(mM);
     for (uint32_t i = 0; i < encoded.size(); i++)
     {
-      uint32_t q = i / mNumSlots;
-      uint32_t r = i % mNumSlots;
-      encoded_spacing[i] = encoded[r * mNumBatch + q];
+      uint32_t q = i / mHalfSlots;
+      uint32_t r = i % mHalfSlots;
+      encoded_spacing[i] = encoded[r * mNumHalfBatch + q];
     }
     encoded = encoded_spacing;
 
@@ -789,21 +874,9 @@ namespace rlweOkvs
 
       for (uint32_t j = jBegin; j < jEnd; ++j)
       {
-        const uint32_t activeWraps = activeWrapCountForBatch(j, mNumBatch, mW, mWrap);
-        for (uint32_t k = 0; k < activeWraps; ++k)
-        {
-          if (j == mNumBatch - 1 && k > 0)
-          {
-            std::copy_n(&encoded[j * mNumSlots + k], mNumSlots - k, plainVec.data());
-            std::copy_n(&encoded[0], k, plainVec.data() + mNumSlots - k);
-          }
-          else
-          {
-            std::copy_n(&encoded[j * mNumSlots + k], mNumSlots, plainVec.data());
-          }
-          mBatchEncoder->encode(plainVec, ptxt);
-          mEncryptor->encrypt_symmetric(ptxt).save(ctxtstream);
-        }
+        std::copy_n(&encoded[j * mNumSlots], mNumSlots, plainVec.data());
+        mBatchEncoder->encode(plainVec, ptxt);
+        mEncryptor->encrypt_symmetric(ptxt).save(ctxtstream);
       }
 
       auto payload = ctxtstream.str();

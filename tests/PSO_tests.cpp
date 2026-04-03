@@ -21,8 +21,20 @@ using namespace oc;
 using namespace seal;
 using namespace rlweOkvs;
 
+namespace
+{
+    u32 printed_wrap(const rpmtParams &params, u64 n)
+    {
+        auto numslots = params.heNumSlots;
+        auto m = roundUpTo(params.bandExpansion * n, numslots);
+        auto half_slots = static_cast<u32>(numslots / 2);
+        auto num_half_batch = static_cast<u32>(m / half_slots);
+        return 1 + divCeil(params.bandWidth, num_half_batch);
+    }
+}
+
 void psu_protocol_test(const oc::CLP& cmd)
-{       
+{
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 18));
     u64 nt = cmd.getOr("nt", 1);
     
@@ -83,9 +95,7 @@ void psu_protocol_test(const oc::CLP& cmd)
         cout << "\n-------Params-------" << endl;
         cout << "w: " << parms.bandWidth << endl;
         cout << "m/n: " << parms.bandExpansion << endl;
-        auto numslots = parms.heNumSlots;
-        auto m = roundUpTo(parms.bandExpansion * n, numslots);
-        cout << "wrap: " << divCeil(parms.bandWidth * numslots, m) + 1 << endl;
+        cout << "wrap: " << printed_wrap(parms, n) << endl;
         cout << "seq_span: " << parms.span_blocks<< endl;
         cout << "--------------------" << endl;
     }
@@ -145,9 +155,7 @@ void psi_card_test(const oc::CLP& cmd)
         cout << "\n-------Params-------" << endl;
         cout << "w: " << pmtParams.bandWidth << endl;
         cout << "m/n: " << pmtParams.bandExpansion << endl;
-        auto numslots = pmtParams.heNumSlots;
-        auto m = roundUpTo(pmtParams.bandExpansion * n, numslots);
-        cout << "wrap: " << divCeil(pmtParams.bandWidth * numslots, m) + 1 << endl;
+        cout << "wrap: " << printed_wrap(pmtParams, n) << endl;
         cout << "seq_span: " << pmtParams.span_blocks<< endl;
         cout << "--------------------" << endl;
     }
