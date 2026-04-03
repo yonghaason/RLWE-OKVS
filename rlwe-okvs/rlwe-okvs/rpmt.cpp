@@ -40,6 +40,38 @@ namespace rlweOkvs
     {
       return chunkEnvOrDefault("RLWE_OKVS_DECODED_LAYER_CHUNK", 8);
     }
+
+    uint32_t activeBatchCountForWrap(uint32_t k, uint32_t numBatch, uint32_t width)
+    {
+      const int64_t count =
+          static_cast<int64_t>(width) + (1 - static_cast<int64_t>(k)) * numBatch - 1;
+      if (count <= 0)
+      {
+        return 0;
+      }
+      return std::min<uint32_t>(numBatch, static_cast<uint32_t>(count));
+    }
+
+    uint32_t activeWrapCountForBatch(
+        uint32_t j, uint32_t numBatch, uint32_t width, uint32_t maxWrap)
+    {
+      uint32_t wraps = 0;
+      while (wraps < maxWrap && j < activeBatchCountForWrap(wraps, numBatch, width))
+      {
+        ++wraps;
+      }
+      return wraps;
+    }
+
+    uint64_t totalEncodedCipherCount(uint32_t numBatch, uint32_t width, uint32_t maxWrap)
+    {
+      uint64_t total = 0;
+      for (uint32_t k = 0; k < maxWrap; ++k)
+      {
+        total += activeBatchCountForWrap(k, numBatch, width);
+      }
+      return total;
+    }
   }
 
   void RpmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing)
@@ -453,6 +485,7 @@ namespace rlweOkvs
   {
     SEALContext context = *mContext;    
     size_t recvBytes = 0;
+    uint64_t recvCtxts = 0;
     string recvstring;
     stringstream recvstream;
 
@@ -469,14 +502,16 @@ namespace rlweOkvs
       for (uint32_t j = jBegin; j < jEnd; ++j)
       {
         encoded_in_he[j].resize(mWrap);
-        for (uint32_t k = 0; k < mWrap; ++k)
+        const uint32_t activeWraps = activeWrapCountForBatch(j, mNumBatch, mW, mWrap);
+        for (uint32_t k = 0; k < activeWraps; ++k)
         {
           encoded_in_he[j][k].unsafe_load(context, recvstream);
+          ++recvCtxts;
         }
       }
     }
 
-    cout << "Sender receives " << mNumBatch << " X " << mWrap
+    cout << "Sender receives " << recvCtxts
          << " Ctxts of OKVS Encoding, " << recvBytes << " Bytes" << endl;
 
     setTimePoint("Sender::Recv ctxts & Serialize");
@@ -566,6 +601,13 @@ namespace rlweOkvs
         {
           continue;
         }
+
+        const uint32_t activeWraps = activeWrapCountForBatch(j, mNumBatch, mW, mWrap);
+        if (k_begin >= activeWraps)
+        {
+          continue;
+        }
+        k_end = std::min<uint32_t>(k_end, activeWraps - 1);
 
         uint32_t k = k_begin;
 
@@ -736,6 +778,7 @@ namespace rlweOkvs
     vector<uint64_t> plainVec(mNumSlots);
     Plaintext ptxt;
     stringstream ctxtstream;
+    const uint64_t sentCtxts = totalEncodedCipherCount(mNumBatch, mW, mWrap);
 
     const uint32_t chunkSize = encodedBatchChunk();
     for (uint32_t jBegin = 0; jBegin < mNumBatch; jBegin += chunkSize)
@@ -746,7 +789,8 @@ namespace rlweOkvs
 
       for (uint32_t j = jBegin; j < jEnd; ++j)
       {
-        for (uint32_t k = 0; k < mWrap; ++k)
+        const uint32_t activeWraps = activeWrapCountForBatch(j, mNumBatch, mW, mWrap);
+        for (uint32_t k = 0; k < activeWraps; ++k)
         {
           if (j == mNumBatch - 1 && k > 0)
           {
@@ -765,6 +809,9 @@ namespace rlweOkvs
       auto payload = ctxtstream.str();
       co_await chl.send(move(payload));
     }
+
+    cout << "Receiver sends " << sentCtxts
+         << " Ctxts of OKVS Encoding" << endl;
 
     setTimePoint("Receiver::Encryption & Send");
   }
