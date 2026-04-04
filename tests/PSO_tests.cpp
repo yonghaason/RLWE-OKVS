@@ -140,6 +140,9 @@ void psi_card_test(const oc::CLP& cmd)
 
     rpmtParams pmtParams;
     pmtParams.initialize(n);
+
+    pmtParams.bandWidth = cmd.getOr("w", 53);
+    pmtParams.bandExpansion = cmd.getOr("m_r", 1.5);
     
     if (cmd.isSet("v")) {
         cout << "\n-------Params-------" << endl;

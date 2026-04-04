@@ -44,3 +44,5 @@ build/*
 .vscode/*
 __pycache__/*
 thirdparty/install/*
+.codex
+tuning/*

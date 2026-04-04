@@ -98,13 +98,12 @@ void sequencing_test(const oc::CLP& cmd)
     }
     
     timer.setTimePoint("sequencing_with_span");
-
+    
+    std::cout << "Span:" << (double) span_avg / repeat
+    <<" / Maximal bin size: " << (double) maxbin_avg / repeat
+    << std::endl;
     
     if (cmd.isSet("v")) {
-        std::cout << "Span:" << (double) span_avg / repeat
-        <<" / Maximal bin size: " << (double) maxbin_avg / repeat
-        << std::endl;
-
         cout << timer << endl;
     }
 }
