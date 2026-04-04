@@ -22,7 +22,7 @@ Options:
   --th-cnt <int>         width_test thread count (default: 12)
   --test-index <int>     test index for OKVS_width_test (default: 0)
   --run-bin <path>       run binary path (default: ./build/run)
-  --source-root <path>   autosweep root (default: tuning/okvs_width)
+  --source-root <path>   autosweep root (default: log/okvs_width)
   --seed-summary <path>  optional TSV from prior probe; if given, use chosen_width as seed
   --out <path>           output TSV path
   --help                 show this help
@@ -43,7 +43,7 @@ RATIO_STEP=0.1
 TH_CNT=12
 TEST_INDEX=0
 RUN_BIN=./build/run
-SOURCE_ROOT=tuning/okvs_width
+SOURCE_ROOT=log/okvs_width
 SEED_SUMMARY=""
 OUT_FILE=""
 
@@ -71,7 +71,7 @@ if [[ ! -x "$RUN_BIN" ]]; then
 fi
 
 if [[ -z "$OUT_FILE" ]]; then
-  OUT_FILE="tuning/okvs_nn${PROBE_NN}_probe_fit.tsv"
+  OUT_FILE="log/okvs_nn${PROBE_NN}_probe_fit.tsv"
 fi
 
 mkdir -p "$(dirname "$OUT_FILE")"

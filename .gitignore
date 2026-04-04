@@ -45,4 +45,3 @@ build/*
 __pycache__/*
 thirdparty/install/*
 .codex
-tuning/*

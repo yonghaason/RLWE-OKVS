@@ -25,7 +25,7 @@ Options:
   --target-log2-fr <float> stop full sweep once log2(failure_rate) < this value (default: -9)
   --target-fr <float>      explicit stop threshold on failure_rate (overrides target-log2-fr)
 
-  --out-root <path>        root directory for autosweep outputs (default: tuning/okvs_width)
+  --out-root <path>        root directory for autosweep outputs (default: log/okvs_width)
   --tag <string>           optional tag added to run directory name
   --extra-arg <token>      extra single token passed through to ./build/run (repeatable)
 
@@ -33,7 +33,7 @@ Persistent outputs per run:
   - autosweep_summary.txt
   - full_search.tsv
 
-width_test itself will still write only its TSV under tuning/okvs_width/.
+width_test itself will still write only its TSV under log/okvs_width/.
 EOF
 }
 
@@ -53,7 +53,7 @@ COARSE_MAX_FR=0.90
 TARGET_LOG2_FR=-9
 TARGET_FR=""
 
-OUT_ROOT="tuning/okvs_width"
+OUT_ROOT="log/okvs_width"
 TAG=""
 declare -a EXTRA_ARGS=()
 
@@ -415,7 +415,7 @@ for (( w=FOUND_W; w<=MAX_W; ++w )); do
   fi
 done
 
-WIDTH_TEST_TSV="tuning/okvs_width/${NN}_${ratio_fixed}_${LOGP}_${FULL_TRIALS}.tsv"
+WIDTH_TEST_TSV="log/okvs_width/${NN}_${ratio_fixed}_${LOGP}_${FULL_TRIALS}.tsv"
 
 if [[ -n "$STOP_W" ]]; then
   {

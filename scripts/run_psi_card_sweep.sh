@@ -5,8 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${BUILD_DIR:-$ROOT_DIR/build}"
 RUN_BIN="${RUN_BIN:-$BUILD_DIR/run}"
-PROBE_DIR="${PROBE_DIR:-$ROOT_DIR/tuning}"
-RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/tuning/realresults}"
+PROBE_DIR="${PROBE_DIR:-$ROOT_DIR/log}"
+RESULTS_DIR="${RESULTS_DIR:-$ROOT_DIR/log/realresults}"
 
 NN="${NN:-18}"
 TEST_INDEX="${TEST_INDEX:-1}"

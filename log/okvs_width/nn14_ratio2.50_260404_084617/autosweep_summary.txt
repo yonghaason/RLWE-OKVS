@@ -1,0 +1,26 @@
+run_bin=./build/run
+nn=14
+ratio=2.5
+ratio_fixed=2.50
+logp=60
+start_w=1
+max_w=256
+th_cnt=12
+coarse_trials=100
+full_trials=30000
+coarse_min_fr=0.01
+coarse_max_fr=0.90
+target_log2_fr=-9
+target_fr=0.001953125
+run_dir=tuning/okvs_width/20260404_084617_nn14_ratio2.50
+coarse_result=found
+coarse_start_width=6
+coarse_start_failure_rate=0.500000
+full_result=threshold_reached
+full_stop_width=10
+full_stop_failure_rate=0.001033
+width_test_data_file=tuning/okvs_width/14_2.50_60_30000.tsv
+fit_points=5
+fit_slope=-2.228601340486307
+fit_intercept=12.54150862754668
+fit_model=log2_failure_rate ~= -2.228601340486307 * w + 12.54150862754668

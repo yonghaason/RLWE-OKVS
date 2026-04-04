@@ -1,0 +1,820 @@
+=== w=162 m_r=1.10 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 162
+m/n: 1.1
+wrap: 19
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 170 Ctxts of OKVS Encoding
+Sender receives 170 Ctxts of OKVS Encoding, 32119726 Bytes
+Sender sends 19 decoded ctxts, 4680616 Bytes
+Noise Budget: 42
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         86.1     86.081  ******
+Sender::Generate Bands                              158.9     72.798  ******
+Sender::Sequencing                                  163.8      4.920  **
+Sender::HE Encode                                   530.8    366.975  ********
+Sender::Recv ctxts & Serialize                      999.9    469.107  ********
+Sender::Encrypted OKVS Decoding & Send Back        2544.4   1544.528  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             78.9     78.922  ******
+Receiver::OKVS Encoding                   407.4    328.433  ********
+Receiver::Encryption & Send               826.3    418.955  ********
+Receiver::Recv back and Serialize        2546.3   1720.018  **********
+Receiver::Decrypt                        2555.0      8.623  ***
+
+comm 4.564 + 32.003 = 36.567MB
+[1m[32m  Passed[0m   2713ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=92 m_r=1.20 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 92
+m/n: 1.2
+wrap: 11
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 101 Ctxts of OKVS Encoding
+Sender receives 101 Ctxts of OKVS Encoding, 19083173 Bytes
+Sender sends 21 decoded ctxts, 5173355 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         86.9     86.929  ******
+Sender::Generate Bands                              125.7     38.769  *****
+Sender::Sequencing                                  130.7      5.032  **
+Sender::HE Encode                                   351.2    220.509  ********
+Sender::Recv ctxts & Serialize                      576.6    225.396  ********
+Sender::Encrypted OKVS Decoding & Send Back        1570.3    993.672  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             79.0     79.019  ******
+Receiver::OKVS Encoding                   241.5    162.467  *******
+Receiver::Encryption & Send               488.2    246.697  ********
+Receiver::Recv back and Serialize        1577.3   1089.106  **********
+Receiver::Decrypt                        1594.8     17.556  ****
+
+comm 5.034 + 19.570 = 24.605MB
+[1m[32m  Passed[0m   1745ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=66 m_r=1.30 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 66
+m/n: 1.3
+wrap: 7
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 76 Ctxts of OKVS Encoding
+Sender receives 76 Ctxts of OKVS Encoding, 14359187 Bytes
+Sender sends 20 decoded ctxts, 4927284 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         87.8     87.824  *******
+Sender::Generate Bands                              115.9     28.070  *****
+Sender::Sequencing                                  120.9      5.034  **
+Sender::HE Encode                                   276.5    155.532  ********
+Sender::Recv ctxts & Serialize                      441.8    165.300  ********
+Sender::Encrypted OKVS Decoding & Send Back        1159.8    718.024  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             80.2     80.193  *******
+Receiver::OKVS Encoding                   194.7    114.525  *******
+Receiver::Encryption & Send               382.3    187.567  ********
+Receiver::Recv back and Serialize        1165.0    782.682  **********
+Receiver::Decrypt                        1184.0     19.004  ****
+
+comm 4.801 + 15.065 = 19.866MB
+[1m[32m  Passed[0m   1342ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=58 m_r=1.40 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 58
+m/n: 1.4
+wrap: 6
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 69 Ctxts of OKVS Encoding
+Sender receives 69 Ctxts of OKVS Encoding, 13037041 Bytes
+Sender sends 20 decoded ctxts, 4926395 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         94.9     94.932  *******
+Sender::Generate Bands                              121.1     26.211  *****
+Sender::Sequencing                                  126.4      5.302  ***
+Sender::HE Encode                                   269.9    143.440  ********
+Sender::Recv ctxts & Serialize                      416.7    146.819  ********
+Sender::Encrypted OKVS Decoding & Send Back        1069.6    652.873  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             85.0     85.039  *******
+Receiver::OKVS Encoding                   187.0    101.921  *******
+Receiver::Encryption & Send               381.8    194.839  ********
+Receiver::Recv back and Serialize        1073.8    692.003  **********
+Receiver::Decrypt                        1091.8     17.949  ****
+
+comm 4.800 + 13.804 = 18.605MB
+[1m[32m  Passed[0m   1249ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=50 m_r=1.50 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 50
+m/n: 1.5
+wrap: 6
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 61 Ctxts of OKVS Encoding
+Sender receives 61 Ctxts of OKVS Encoding, 11525321 Bytes
+Sender sends 20 decoded ctxts, 4927295 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         78.5     78.536  *******
+Sender::Generate Bands                              104.0     25.493  *****
+Sender::Sequencing                                  109.3      5.224  ***
+Sender::HE Encode                                   234.0    124.718  ********
+Sender::Recv ctxts & Serialize                      351.2    117.229  ********
+Sender::Encrypted OKVS Decoding & Send Back         910.5    559.282  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             63.9     63.939  ******
+Receiver::OKVS Encoding                   157.6     93.642  *******
+Receiver::Encryption & Send               302.0    144.430  ********
+Receiver::Recv back and Serialize         914.7    612.692  **********
+Receiver::Decrypt                         932.8     18.059  *****
+
+comm 4.801 + 12.362 = 17.163MB
+[1m[32m  Passed[0m   1103ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=42 m_r=1.60 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 42
+m/n: 1.6
+wrap: 5
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 54 Ctxts of OKVS Encoding
+Sender receives 54 Ctxts of OKVS Encoding, 10202592 Bytes
+Sender sends 22 decoded ctxts, 5419265 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         98.5     98.501  *******
+Sender::Generate Bands                              118.7     20.230  ****
+Sender::Sequencing                                  124.1      5.393  ***
+Sender::HE Encode                                   238.2    114.045  *******
+Sender::Recv ctxts & Serialize                      325.7     87.514  *******
+Sender::Encrypted OKVS Decoding & Send Back        1155.7    829.975  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             88.2     88.202  *******
+Receiver::OKVS Encoding                   171.7     83.513  *******
+Receiver::Encryption & Send               305.0    133.272  *******
+Receiver::Recv back and Serialize        1167.6    862.569  **********
+Receiver::Decrypt                        1202.7     35.110  *****
+
+comm 5.271 + 11.101 = 16.372MB
+[1m[32m  Passed[0m   1532ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=36 m_r=1.70 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 36
+m/n: 1.7
+wrap: 4
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 49 Ctxts of OKVS Encoding
+Sender receives 49 Ctxts of OKVS Encoding, 9257891 Bytes
+Sender sends 21 decoded ctxts, 5172141 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                        100.3    100.312  *******
+Sender::Generate Bands                              124.1     23.803  *****
+Sender::Sequencing                                  133.8      9.712  ***
+Sender::HE Encode                                   277.7    143.909  *******
+Sender::Recv ctxts & Serialize                      465.8    188.035  ********
+Sender::Encrypted OKVS Decoding & Send Back        1262.1    796.284  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                            102.4    102.373  *******
+Receiver::OKVS Encoding                   231.6    129.239  *******
+Receiver::Encryption & Send               434.7    203.046  ********
+Receiver::Recv back and Serialize        1265.5    830.878  **********
+Receiver::Decrypt                        1281.1     15.578  ****
+
+comm 5.036 + 10.200 = 15.236MB
+[1m[32m  Passed[0m   1660ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=35 m_r=1.80 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 35
+m/n: 1.8
+wrap: 4
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 49 Ctxts of OKVS Encoding
+Sender receives 49 Ctxts of OKVS Encoding, 9258108 Bytes
+Sender sends 21 decoded ctxts, 5174125 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         74.0     73.997  *******
+Sender::Generate Bands                               98.1     24.128  *****
+Sender::Sequencing                                  107.1      9.010  ****
+Sender::HE Encode                                   230.5    123.328  ********
+Sender::Recv ctxts & Serialize                      393.3    162.848  ********
+Sender::Encrypted OKVS Decoding & Send Back         909.9    516.561  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             70.7     70.691  *******
+Receiver::OKVS Encoding                   171.7    100.992  *******
+Receiver::Encryption & Send               358.8    187.150  ********
+Receiver::Recv back and Serialize         912.6    553.788  **********
+Receiver::Decrypt                         928.1     15.447  ****
+
+comm 5.038 + 10.200 = 15.239MB
+[1m[32m  Passed[0m   1123ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=31 m_r=1.90 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 31
+m/n: 1.9
+wrap: 3
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 46 Ctxts of OKVS Encoding
+Sender receives 46 Ctxts of OKVS Encoding, 8691250 Bytes
+Sender sends 19 decoded ctxts, 4680467 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         76.0     76.017  *******
+Sender::Generate Bands                               95.3     19.321  ****
+Sender::Sequencing                                  104.6      9.293  ***
+Sender::HE Encode                                   220.2    115.537  *******
+Sender::Recv ctxts & Serialize                      389.9    169.776  ********
+Sender::Encrypted OKVS Decoding & Send Back        1126.4    736.482  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             72.8     72.752  ******
+Receiver::OKVS Encoding                   167.7     94.994  *******
+Receiver::Encryption & Send               347.5    179.766  ********
+Receiver::Recv back and Serialize        1128.4    780.843  **********
+Receiver::Decrypt                        1142.5     14.181  ****
+
+comm 4.569 + 9.660 = 14.228MB
+[1m[32m  Passed[0m   1406ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=28 m_r=2.00 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 28
+m/n: 2
+wrap: 3
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 43 Ctxts of OKVS Encoding
+Sender receives 43 Ctxts of OKVS Encoding, 8124561 Bytes
+Sender sends 20 decoded ctxts, 4927383 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         84.6     84.572  *******
+Sender::Generate Bands                              104.3     19.697  *****
+Sender::Sequencing                                  115.4     11.153  ****
+Sender::HE Encode                                   229.4    114.005  *******
+Sender::Recv ctxts & Serialize                      383.0    153.600  ********
+Sender::Encrypted OKVS Decoding & Send Back        1054.4    671.338  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             76.7     76.714  *******
+Receiver::OKVS Encoding                   171.8     95.085  *******
+Receiver::Encryption & Send               336.3    164.517  ********
+Receiver::Recv back and Serialize        1056.8    720.516  **********
+Receiver::Decrypt                        1071.5     14.655  ****
+
+comm 4.804 + 9.119 = 13.924MB
+[1m[32m  Passed[0m   1311ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=26 m_r=2.10 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 26
+m/n: 2.1
+wrap: 3
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 42 Ctxts of OKVS Encoding
+Sender receives 42 Ctxts of OKVS Encoding, 7935298 Bytes
+Sender sends 23 decoded ctxts, 5665264 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         88.4     88.429  *******
+Sender::Generate Bands                              106.1     17.640  ****
+Sender::Sequencing                                  119.9     13.814  ****
+Sender::HE Encode                                   224.6    104.744  *******
+Sender::Recv ctxts & Serialize                      332.9    108.303  *******
+Sender::Encrypted OKVS Decoding & Send Back         987.4    654.459  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             73.0     72.987  *******
+Receiver::OKVS Encoding                   159.4     86.376  *******
+Receiver::Encryption & Send               313.2    153.819  ********
+Receiver::Recv back and Serialize         992.1    678.931  **********
+Receiver::Decrypt                        1009.7     17.595  ****
+
+comm 5.508 + 8.939 = 14.447MB
+[1m[32m  Passed[0m   1238ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=25 m_r=2.20 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 25
+m/n: 2.2
+wrap: 3
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 42 Ctxts of OKVS Encoding
+Sender receives 42 Ctxts of OKVS Encoding, 7935447 Bytes
+Sender sends 22 decoded ctxts, 5419887 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         84.2     84.195  *******
+Sender::Generate Bands                              103.0     18.777  *****
+Sender::Sequencing                                  114.2     11.229  ****
+Sender::HE Encode                                   220.5    106.310  *******
+Sender::Recv ctxts & Serialize                      353.5    132.983  ********
+Sender::Encrypted OKVS Decoding & Send Back        1004.6    651.059  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             79.6     79.578  *******
+Receiver::OKVS Encoding                   170.8     91.190  *******
+Receiver::Encryption & Send               333.9    163.096  ********
+Receiver::Recv back and Serialize        1009.0    675.107  **********
+Receiver::Decrypt                        1025.4     16.381  ****
+
+comm 5.275 + 8.939 = 14.213MB
+[1m[32m  Passed[0m   1322ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=24 m_r=2.30 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 24
+m/n: 2.3
+wrap: 3
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 42 Ctxts of OKVS Encoding
+Sender receives 42 Ctxts of OKVS Encoding, 7935353 Bytes
+Sender sends 22 decoded ctxts, 5419858 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                        107.2    107.210  *******
+Sender::Generate Bands                              122.5     15.329  ****
+Sender::Sequencing                                  136.0     13.499  ****
+Sender::HE Encode                                   266.7    130.614  ********
+Sender::Recv ctxts & Serialize                      392.6    125.939  ********
+Sender::Encrypted OKVS Decoding & Send Back        1010.4    617.763  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                            109.6    109.605  *******
+Receiver::OKVS Encoding                   203.1     93.485  *******
+Receiver::Encryption & Send               379.5    176.380  ********
+Receiver::Recv back and Serialize        1015.2    635.762  **********
+Receiver::Decrypt                        1037.3     22.091  *****
+
+comm 5.276 + 8.939 = 14.214MB
+[1m[32m  Passed[0m   1333ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=23 m_r=2.40 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 23
+m/n: 2.4
+wrap: 3
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 42 Ctxts of OKVS Encoding
+Sender receives 42 Ctxts of OKVS Encoding, 7935350 Bytes
+Sender sends 22 decoded ctxts, 5419290 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         90.8     90.806  *******
+Sender::Generate Bands                              106.3     15.446  ****
+Sender::Sequencing                                  116.9     10.666  ****
+Sender::HE Encode                                   217.6    100.662  *******
+Sender::Recv ctxts & Serialize                      384.3    166.722  ********
+Sender::Encrypted OKVS Decoding & Send Back         980.5    596.226  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             94.9     94.915  *******
+Receiver::OKVS Encoding                   194.1     99.204  *******
+Receiver::Encryption & Send               371.2    177.084  ********
+Receiver::Recv back and Serialize         984.5    613.326  **********
+Receiver::Decrypt                        1002.1     17.571  ****
+
+comm 5.276 + 8.939 = 14.215MB
+[1m[32m  Passed[0m   1307ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=22 m_r=2.50 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 22
+m/n: 2.5
+wrap: 3
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 41 Ctxts of OKVS Encoding
+Sender receives 41 Ctxts of OKVS Encoding, 7746419 Bytes
+Sender sends 22 decoded ctxts, 5419453 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         92.9     92.872  *******
+Sender::Generate Bands                              108.1     15.212  ****
+Sender::Sequencing                                  118.8     10.714  ****
+Sender::HE Encode                                   205.5     86.705  *******
+Sender::Recv ctxts & Serialize                      344.6    139.047  ********
+Sender::Encrypted OKVS Decoding & Send Back         921.7    577.110  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             89.2     89.213  *******
+Receiver::OKVS Encoding                   176.2     86.982  *******
+Receiver::Encryption & Send               332.6    156.431  ********
+Receiver::Recv back and Serialize         926.6    594.019  **********
+Receiver::Decrypt                         945.9     19.274  *****
+
+comm 5.276 + 8.759 = 14.035MB
+[1m[32m  Passed[0m   1182ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=21 m_r=2.60 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 21
+m/n: 2.6
+wrap: 2
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 41 Ctxts of OKVS Encoding
+Sender receives 41 Ctxts of OKVS Encoding, 7746448 Bytes
+Sender sends 22 decoded ctxts, 5419505 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         86.3     86.289  *******
+Sender::Generate Bands                              101.3     15.005  ****
+Sender::Sequencing                                  111.7     10.371  ****
+Sender::HE Encode                                   198.9     87.256  *******
+Sender::Recv ctxts & Serialize                      344.7    145.753  ********
+Sender::Encrypted OKVS Decoding & Send Back         886.8    542.082  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             86.1     86.088  *******
+Receiver::OKVS Encoding                   172.1     85.971  *******
+Receiver::Encryption & Send               329.2    157.139  ********
+Receiver::Recv back and Serialize         890.5    561.251  **********
+Receiver::Decrypt                         906.1     15.622  ****
+
+comm 5.275 + 8.759 = 14.033MB
+[1m[32m  Passed[0m   1144ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=21 m_r=2.70 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 21
+m/n: 2.7
+wrap: 2
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 42 Ctxts of OKVS Encoding
+Sender receives 42 Ctxts of OKVS Encoding, 7935407 Bytes
+Sender sends 22 decoded ctxts, 5419918 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         78.1     78.107  *******
+Sender::Generate Bands                               93.7     15.611  ****
+Sender::Sequencing                                  104.3     10.543  ****
+Sender::HE Encode                                   179.0     74.751  *******
+Sender::Recv ctxts & Serialize                      327.3    148.244  ********
+Sender::Encrypted OKVS Decoding & Send Back         874.1    546.845  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             74.0     74.046  *******
+Receiver::OKVS Encoding                   155.3     81.287  *******
+Receiver::Encryption & Send               310.8    155.479  ********
+Receiver::Recv back and Serialize         878.5    567.698  **********
+Receiver::Decrypt                         895.0     16.493  ****
+
+comm 5.276 + 8.939 = 14.215MB
+[1m[32m  Passed[0m   1147ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=20 m_r=2.80 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 20
+m/n: 2.8
+wrap: 2
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 42 Ctxts of OKVS Encoding
+Sender receives 42 Ctxts of OKVS Encoding, 7935569 Bytes
+Sender sends 22 decoded ctxts, 5419563 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         85.8     85.810  *******
+Sender::Generate Bands                               99.2     13.427  ****
+Sender::Sequencing                                  110.3     11.033  ****
+Sender::HE Encode                                   193.8     83.565  *******
+Sender::Recv ctxts & Serialize                      331.6    137.804  ********
+Sender::Encrypted OKVS Decoding & Send Back         881.6    549.989  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             88.0     88.026  *******
+Receiver::OKVS Encoding                   171.1     83.122  *******
+Receiver::Encryption & Send               313.8    142.658  ********
+Receiver::Recv back and Serialize         885.3    571.481  **********
+Receiver::Decrypt                         901.8     16.501  ****
+
+comm 5.276 + 8.939 = 14.215MB
+[1m[32m  Passed[0m   1141ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=19 m_r=2.90 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 19
+m/n: 2.9
+wrap: 2
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 42 Ctxts of OKVS Encoding
+Sender receives 42 Ctxts of OKVS Encoding, 7935635 Bytes
+Sender sends 23 decoded ctxts, 5665943 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         75.3     75.320  *******
+Sender::Generate Bands                               87.4     12.052  ****
+Sender::Sequencing                                   97.4     10.045  ****
+Sender::HE Encode                                   178.4     81.004  *******
+Sender::Recv ctxts & Serialize                      317.3    138.853  ********
+Sender::Encrypted OKVS Decoding & Send Back         730.1    412.849  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             72.5     72.509  *******
+Receiver::OKVS Encoding                   149.1     76.556  *******
+Receiver::Encryption & Send               306.3    157.227  ********
+Receiver::Recv back and Serialize         735.2    428.945  **********
+Receiver::Decrypt                         752.2     16.928  *****
+
+comm 5.511 + 8.939 = 14.451MB
+[1m[32m  Passed[0m   999ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
+=== w=18 m_r=3.00 test_u=1 nn=16 ===
+1 - [1m[34mPSI_card_test                    [0m
+-------Params-------
+w: 18
+m/n: 3
+wrap: 2
+seq_span: 9
+--------------------
+VOLE takes 348650 bytes
+Sender receives OPRF (1153424 Bytes)
+Receiver sends 41 Ctxts of OKVS Encoding
+Sender receives 41 Ctxts of OKVS Encoding, 7746277 Bytes
+Sender sends 23 decoded ctxts, 5665244 Bytes
+Noise Budget: 43
+PSI cardinality = 61143
+Expected        = 61143
+
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::OPRF                                         93.3     93.309  *******
+Sender::Generate Bands                              107.0     13.736  ****
+Sender::Sequencing                                  119.9     12.893  ****
+Sender::HE Encode                                   219.0     99.080  *******
+Sender::Recv ctxts & Serialize                      327.2    108.146  *******
+Sender::Encrypted OKVS Decoding & Send Back         873.9    546.764  **********
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Receiver::OPRF                             84.4     84.389  *******
+Receiver::OKVS Encoding                   172.3     87.898  *******
+Receiver::Encryption & Send               311.3    138.967  ********
+Receiver::Recv back and Serialize         878.1    566.877  **********
+Receiver::Decrypt                         892.9     14.795  ****
+
+comm 5.511 + 8.759 = 14.270MB
+[1m[32m  Passed[0m   1148ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m
