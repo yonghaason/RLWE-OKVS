@@ -8,7 +8,6 @@
 #include "coproto/coproto.h"
 
 #include "seal/seal.h"
-#include "../band_okvs/oprf.h"
 
 using namespace std;
 using namespace seal;
@@ -19,7 +18,7 @@ namespace rlweOkvs
     using Proto = coproto::task<>;
     using Socket = coproto::Socket;
     
-    struct rpmtParams {
+    struct sspmtParams {
         u32 heNumSlots = 1 << 13;
         std::vector<int> heCoeffModulus;
         u32 hePlainModulusBits;
@@ -31,8 +30,6 @@ namespace rlweOkvs
                 case (1ull << 16):
                     heCoeffModulus = {50, 58, 60, 50};
                     hePlainModulusBits = 56;
-                    // bandWidth = 37;
-                    // bandExpansion = 1.7;
                     bandWidth = 28;
                     bandExpansion = 2.3;
                     span_blocks = 9;
@@ -40,29 +37,20 @@ namespace rlweOkvs
                 case (1ull << 18):
                     heCoeffModulus = {54, 58, 60, 50};
                     hePlainModulusBits = 58;
-                    // bandWidth = 52;
-                    // bandExpansion = 1.5;
                     bandWidth = 28;
                     bandExpansion = 2.2;
                     span_blocks = 13;
                     break;
                 case (1ull << 20):
                     heCoeffModulus = {58, 58, 60, 50};
-                    // heCoeffModulus = {40, 48, 48, 50};
                     hePlainModulusBits = 60;
-                    // bandWidth = 53;
-                    // bandExpansion = 1.5;
                     bandWidth = 31;
                     bandExpansion = 2.1;
-                    // bandWidth = 25;
-                    // bandExpansion = 2.7;
                     span_blocks = 20;                    
                     break;
                 case (1ull << 22):
                     heCoeffModulus = {60, 60, 60, 50};
                     hePlainModulusBits = 60; 
-                    // bandWidth = 55;
-                    // bandExpansion = 1.5;
                     bandWidth = 45;
                     bandExpansion = 1.7;
                     span_blocks = 30;
@@ -77,11 +65,10 @@ namespace rlweOkvs
         }
     };
 
-    class RpmtSender: public oc::TimerAdapter
+    class SspmtSender: public oc::TimerAdapter
     {
         
         oc::PRNG mPrng;
-        OprfSender mOprfSender;
         Modulus mModulus;
         uint64_t mNumSlots;
         unique_ptr<Evaluator> mEvaluator;
@@ -107,7 +94,7 @@ namespace rlweOkvs
         
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
 
-        bool mSharedOutput = false;
+        bool mRpmt = false;
         uint64_t mOTeBatchSize = 1ull << 19; 
         
     public:
@@ -115,9 +102,9 @@ namespace rlweOkvs
     
         void init(
             uint32_t n, uint32_t nReceiver, 
-            rpmtParams rParams, oc::block seed = oc::OneBlock);
+            sspmtParams ssParams, oc::block seed = oc::OneBlock);
 
-        void sharedOutputOn() {mSharedOutput = true;};
+        void rpmt_on() {mRpmt = true;};
         auto get_ot_idx() {return ot_idx;};
         u32 getNumLayers() {return mNumLayers;};
 
@@ -148,10 +135,9 @@ namespace rlweOkvs
             uint32_t layerEnd);
     };
 
-    class RpmtReceiver: public oc::TimerAdapter
+    class SspmtReceiver: public oc::TimerAdapter
     {
         oc::PRNG mPrng;
-        OprfReceiver mOprfReceiver;
         Modulus mModulus;
         uint64_t mNumSlots;
         shared_ptr<SEALContext> mContext;
@@ -166,16 +152,16 @@ namespace rlweOkvs
         std::vector<uint32_t> last_layer_per_bin;
         std::vector<std::vector<uint32_t>> mLayerToBins;
 
-        bool mSharedOutput = false;
+        bool mRpmt = false;
         uint64_t mOTeBatchSize = 1ull << 19;
         
 
     public:
         void init(
             uint32_t n, uint32_t nSender, 
-            rpmtParams rParams, oc::block seed = oc::ZeroBlock);
+            sspmtParams ssParams, oc::block seed = oc::ZeroBlock);
 
-        void sharedOutputOn() {mSharedOutput = true;};
+        void rpmt_on() {mRpmt = true;};
 
         Proto run(
             const std::vector<oc::block> &X, 

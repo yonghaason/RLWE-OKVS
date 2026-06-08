@@ -7,6 +7,7 @@
 #include "cryptoTools/Network/Channel.h"
 #include "coproto/coproto.h"
 #include "rlwe-okvs/rpmt.h"
+#include "rlwe-okvs/sspmt.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "seal/seal.h"
@@ -83,6 +84,69 @@ namespace rlweOkvs
         Proto run(
             const std::vector<oc::block> &X, 
             std::vector<oc::block>& D, 
+            Socket &chl);
+    };
+
+    class PsuSspmtSender: public oc::TimerAdapter
+    {
+        uint32_t mN;
+        uint32_t mNreceiver;
+        oc::PRNG mPrng;
+        sspmtParams mSsParams;
+
+        SspmtSender sspmtSender;
+        SilentOtExtSender otSender;
+
+    public:
+        void initWithParam(uint32_t n, uint32_t nReceiver,
+            sspmtParams ssParams, oc::block seed) {
+            mN = n;
+            mNreceiver = nReceiver;
+            mSsParams = ssParams;
+            mPrng.SetSeed(seed);
+        };
+
+        void init(uint32_t n, uint32_t nReceiver, oc::block seed) {
+            mN = n;
+            mNreceiver = nReceiver;
+            mSsParams.initialize(nReceiver);
+            mPrng.SetSeed(seed);
+        };
+
+        Proto run(
+            const std::vector<oc::block> &Y,
+            Socket &chl);
+    };
+
+    class PsuSspmtReceiver: public oc::TimerAdapter
+    {
+        uint32_t mN;
+        uint32_t mNsender;
+        oc::PRNG mPrng;
+        sspmtParams mSsParams;
+
+        SspmtReceiver sspmtReceiver;
+        SilentOtExtReceiver otReceiver;
+
+    public:
+        void initWithParam(uint32_t n, uint32_t nSender,
+            sspmtParams ssParams, oc::block seed) {
+            mN = n;
+            mNsender = nSender;
+            mSsParams = ssParams;
+            mPrng.SetSeed(seed);
+        };
+
+        void init(uint32_t n, uint32_t nSender, oc::block seed) {
+            mN = n;
+            mNsender = nSender;
+            mSsParams.initialize(n);
+            mPrng.SetSeed(seed);
+        };
+
+        Proto run(
+            const std::vector<oc::block> &X,
+            std::vector<oc::block>& D,
             Socket &chl);
     };
 

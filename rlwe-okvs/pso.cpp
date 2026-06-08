@@ -67,6 +67,64 @@ namespace rlweOkvs
         setTimePoint("Receiver::Final OT");
     };
 
+    Proto PsuSspmtSender::run(
+        const std::vector<oc::block> &Y,
+        Socket &chl)
+    {
+        sspmtSender.init(mN, mNreceiver, mSsParams, mPrng.get());
+        sspmtSender.setTimer(getTimer());
+
+        BitVector sspmt;
+        co_await sspmtSender.run(Y, sspmt, chl);
+
+        auto ot_idx = sspmtSender.get_ot_idx();
+
+        auto comm = chl.bytesSent() + chl.bytesReceived();
+
+        vector<array<block, 2>> rotMsgs(mN);
+        co_await otSender.send(rotMsgs, mPrng, chl);
+
+        vector<block> otp(mN);
+
+        for (size_t i = 0; i < mN; i++) {
+            otp[i] = rotMsgs[i][sspmt[i]] ^ Y[ot_idx[i]];
+        }
+
+        co_await chl.send(std::move(otp));
+
+        comm = chl.bytesSent() + chl.bytesReceived() - comm;
+        cout << "FinalOT(ssPMT PSU) takes " << comm << " bytes" << endl;
+
+        setTimePoint("Sender::Final OT ssPMT PSU");
+    };
+
+    Proto PsuSspmtReceiver::run(
+        const std::vector<oc::block> &X,
+        std::vector<oc::block>& D,
+        Socket &chl)
+    {
+        sspmtReceiver.init(mN, mNsender, mSsParams, mPrng.get());
+        sspmtReceiver.setTimer(getTimer());
+
+        BitVector sspmt;
+        co_await sspmtReceiver.run(X, sspmt, chl);
+
+        vector<block> rotMsgs(mNsender);
+        co_await otReceiver.receive(sspmt, rotMsgs, mPrng, chl);
+
+        vector<block> otp;
+        co_await chl.recvResize(otp);
+
+        for (size_t i = 0; i < otp.size(); i++) {
+            auto tmp = otp[i] ^ rotMsgs[i];
+            if (tmp.mData[1] == 0) {
+                D.push_back(tmp);
+            }
+        }
+
+        setTimePoint("Receiver::Final OT ssPMT PSU");
+    };
+
     Proto PsiCardSumSender::run(
         const std::vector<oc::block> &Y,
         const std::vector<oc::u32> &payloads,
