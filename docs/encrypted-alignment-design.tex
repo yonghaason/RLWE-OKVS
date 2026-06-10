@@ -1,0 +1,246 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{mathtools}
+
+\newcommand{\R}{\mathcal{R}}
+\newcommand{\Rcv}{\mathsf{R}}
+\newcommand{\Snd}{\mathsf{S}}
+\newcommand{\IS}{\mathsf{IS}}
+\newcommand{\Enc}{\mathsf{Enc}}
+\newcommand{\Dec}{\mathsf{Dec}}
+\newcommand{\PlainMult}{\mathsf{PlainMult}}
+\newcommand{\PlainAdd}{\mathsf{PlainAdd}}
+\newcommand{\CtxtAdd}{\mathsf{CtxtAdd}}
+\newcommand{\OPRF}{\mathsf{OPRF}}
+\newcommand{\Zp}{\mathbb{Z}_p}
+\newcommand{\norm}[1]{\lVert #1 \rVert}
+\newcommand{\sigmin}{\sigma_{\min}}
+\DeclareMathOperator{\row}{row}
+\newcommand{\half}{\tfrac{1}{2}}
+
+\title{\textbf{Private Encrypted Data Alignment by ID}\\[4pt]
+\large A design note: extending OKVS/RLWE Reverse-PMT to payload transport}
+\author{Working notes}
+\date{\today}
+
+\theoremstyle{definition}
+\newtheorem{remark}{Remark}
+\newtheorem{problem}{Open problem}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We sketch how to repurpose the OKVS-based, RLWE-instantiated Reverse-PMT (RPMT) of the
+companion paper into a \emph{private encrypted data alignment} primitive: a receiver
+$\Rcv$ holds a table $\{(\mathsf{ID}_i,\mathsf{payload}_i)\}$ and a sender $\Snd$ holds a
+set of IDs; for each of $\Snd$'s IDs that matches one of $\Rcv$'s, $\Snd$ obtains an
+\emph{encryption} of the corresponding payload, aligned to $\Snd$'s own order, so that
+$\Snd$ can run a homomorphic analysis on the aligned payloads together with its own data.
+The two non-trivial pieces are (i) neutralizing the OKVS ``garbage'' on non-matching IDs
+without leaking the join pattern, via a secret-shared membership indicator and a single
+ciphertext$\times$ciphertext mask, and (ii) carrying real-valued payloads in CKKS, which
+turns the OKVS encoding problem from a finite-field full-rank question into a
+\emph{numerical conditioning} question. We record the design decisions and the resulting
+research questions.
+\end{abstract}
+
+\section{Setting and target functionality}
+
+Let $\Rcv$ (receiver, data owner) hold a key--value table
+$T=\{(\mathsf{ID}_i,\mathsf{payload}_i)\}_{i\in[n_x]}$ and let $\Snd$ (sender) hold a set of
+identifiers $\{\mathsf{ID}^\Snd_j\}_{j\in[n_y]}$. We want a protocol that delivers to $\Snd$,
+for each $j$, an \emph{encryption} of $\mathsf{payload}_i$ whenever
+$\mathsf{ID}^\Snd_j=\mathsf{ID}_i$ for some $i$, and an encryption of (effectively) zero
+otherwise; the result is aligned to $\Snd$'s own indexing. $\Snd$ then evaluates an
+application-specific homomorphic function on these aligned ciphertexts and its own
+plaintext data. Throughout, $\Rcv$ holds the RLWE secret key(s); all ciphertexts handed to
+$\Snd$ are under $\Rcv$'s public key, so $\Snd$ computes but cannot decrypt. The final
+analysis output is returned to $\Rcv$ (or kept secret-shared); this delivery and the choice
+of analysis are treated as out of scope here.
+
+\section{Recap of the base RPMT mechanism}
+
+The base construction (companion paper) realizes
+$F_{\mathrm{RPMT}}$: $b_j=\mathbf{1}(y_j\in X)$. Its mechanics that we reuse:
+\begin{enumerate}[leftmargin=*]
+  \item $\Rcv$ OKVS-encodes $\{(x_i',\IS)\}$ --- \emph{same} indicator value $\IS$ for
+  every key --- into $p$, using the \emph{Random Spaced Band} (RSB) matrix (a fixed column
+  permutation $\pi_N$ of a random-band matrix, aligning bands to the RLWE slot size $N$).
+  \item $\Rcv$ RLWE-encrypts $p$ (block-packed, plus pre-rotated copies) and sends it.
+  \item $\Snd$ homomorphically evaluates the OKVS decoding $M\cdot p$ as a
+  (block-)diagonal matrix--vector product, using only slot-wise $\PlainMult/\CtxtAdd$.
+  \emph{Sequencing} (Algorithm~3 of the paper) splits the collision-laden matrix into $L$
+  layers $\bar M_t\in\Zp^{N\times m}$, each with $\le w+\zeta$ diagonals; the assignment of
+  item $i$ to layer/slot $(\mu_i,\tau_i)$ depends only on the band start
+  $a_i=H_1(k_i)$, the slot count $N$, and the span limit $\zeta$ --- \emph{not} on $w$.
+  \item Each decoded slot is $\IS$ if $y_j\in X$ and a pseudorandom value otherwise. The
+  base protocol re-randomizes, returns the $L$ ciphertexts to $\Rcv$, who tests equality
+  with $\IS$.
+\end{enumerate}
+A key efficiency point: sequencing is an $n$-balls-into-$N$-bins process, so its batching
+efficiency relies on the regime $N\ll n$ (well-filled slots). The base parameters fix
+$N=2^{13}$ for all $n\in[2^{16},2^{22}]$.
+
+\paragraph{Secret-shared PMT (Appendix~D).} Masking the decoded plaintext by $r_\mu$ before
+$\Rcv$ decrypts, followed by a secret-shared equality test $F_{\mathrm{ss\text{-}peqt}}$,
+yields XOR shares $b_{X,i}$ (held by $\Rcv$) and $b_{Y,i}$ (held by $\Snd$) with
+$b_{X,i}\oplus b_{Y,i}=\mathbf 1(y_i\in X)$. We reuse this verbatim for the indicator.
+
+\section{The alignment construction}
+
+\subsection{From indicator to payload: two OKVS instances}
+
+Replace the single all-$\IS$ OKVS by \emph{two} OKVS instances sharing the same keys
+$k_i=\OPRF(\mathsf{ID}_i)$:
+\begin{itemize}[leftmargin=*]
+  \item an \emph{indicator} OKVS over a finite field (values all $=\IS$, or all $=1$), used
+  exactly as in the base protocol to produce the membership shares $b_{X,i},b_{Y,i}$;
+  \item a \emph{payload} OKVS whose value for key $k_i$ is $\mathsf{payload}_i$, decoded
+  homomorphically so that $\Snd$ holds an RLWE ciphertext whose slot for $y_j$ contains
+  $\mathsf{payload}_i$ (match) or pseudorandom garbage (non-match).
+\end{itemize}
+With a generic payload, the decoded value alone no longer certifies membership (garbage is
+indistinguishable from a real payload), which is exactly why the separate indicator is
+needed.
+
+\subsection{Removing the garbage without leaking the join}
+
+After the indicator ssPMT, $\Snd$ holds the garbage-laden payload ciphertext, its own share
+$b_{Y,i}$, and knows the slot of each $y_j$; $\Rcv$ holds $b_{X,i}$. Let $b_i=b_{X,i}\oplus
+b_{Y,i}$ be the (secret) membership bit. To zero out non-matches while keeping $b_i$ hidden
+from both parties:
+\begin{enumerate}[leftmargin=*]
+  \item $\Rcv$ encrypts its share $b_{X,i}$ (packed into the payload slot layout) and sends
+  $\Enc(b_{X,i})$ to $\Snd$.
+  \item $\Snd$ forms $\Enc(b_i)$ \emph{using only plaintext operations}, because its own
+  share $s:=b_{Y,i}$ is a known constant per slot:
+  \begin{equation}\label{eq:xor}
+    b_i = b_{X,i}\oplus s = (1-2s)\,b_{X,i} + s
+    \;\;\Longrightarrow\;\;
+    \Enc(b_i)=\PlainAdd\!\big(\PlainMult(\Enc(b_{X,i}),\,1-2s),\ s\big).
+  \end{equation}
+  (Note $a\oplus b=a+b-2ab$, not $a+b-ab$; the latter is OR.) No
+  ciphertext$\times$ciphertext product is needed here.
+  \item $\Snd$ multiplies the membership ciphertext by the payload ciphertext:
+  \[
+    \Enc(\widetilde{\mathsf{payload}})
+    = \Enc(b_i)\odot \Enc(\mathsf{payload}\text{-or-garbage}).
+  \]
+  This is the \emph{single} ciphertext$\times$ciphertext multiplication of the construction:
+  on a match it returns $\mathsf{payload}$, on a non-match $0\cdot\text{garbage}$.
+\end{enumerate}
+The membership bit never appears in the clear to either party, so the join pattern is
+hidden from $\Snd$. The masking multiplication takes the protocol out of the base paper's
+``additive-only'' regime by exactly one multiplicative level (plus relinearization),
+which must be accounted for in the modulus budget.
+
+\begin{remark}[circuit privacy]
+Since $\Snd$'s computation touches the ciphertext before $\Rcv$ decrypts the final analysis
+output, noise-flooding / circuit privacy must be applied before that decryption, exactly as
+the base protocol does on its returned ciphertexts.
+\end{remark}
+
+\subsection{Scheme split: indicator in BGV/BFV, payload in CKKS}
+Real-world payloads are typically real numbers, so the payload OKVS is naturally carried in
+CKKS while the indicator/equality logic stays in BGV/BFV. The re-encryption of $b_{X,i}$ into
+CKKS is free: the share is plaintext to its holder, so no scheme-switching
+primitive is required --- $\Rcv$ simply CKKS-encrypts a fresh $0/1$, and \eqref{eq:xor} runs
+in CKKS. The only semantic change from the BGV masking is that \emph{exact} zeroing becomes
+\emph{approximate}: with $b_i=0\pm\delta$, a non-match leaves a residual $\delta\cdot
+\text{garbage}$. Hence the central numerical requirement:
+\[
+  \norm{p}\le \frac{\norm{v}}{\sigmin(M)},\qquad
+  |\text{garbage}|=|\langle\row(y'),p\rangle|\le \sqrt{w}\,\norm{p},\qquad
+  \text{CKKS residual}\sim \delta\cdot|\text{garbage}|,
+\]
+so controlling $\sigmin(M)$ (equivalently $\norm{p}$) is what keeps the residual below the
+analysis tolerance (Section~\ref{sec:real}).
+
+\subsection{Slot geometry and the ``promote later'' parameter plan}
+BGV/BFV with ring dimension $N$ has $N$ slots; CKKS with ring dimension $N'$ has $N'/2$
+slots. To share one sequencing grid between the two decodes (so $\Rcv$ packs its membership
+share once, with no cross-grid permutation), the slot counts must match. The clean way is to
+choose the CKKS ring as $N'=2N$, which CKKS likely needs anyway for the masking depth and
+payload precision. Then both have $N$ slots and the $(\mu_i,\tau_i)$ layout is identical
+(it depends only on $H_1$, the slot count, and $\zeta$; $w$ and the band values may differ
+between the two instances).
+
+Two further points drive the parameterization:
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Keep $N$ small during alignment.} Sequencing is $n$-balls-into-(slot count);
+  large slot counts under-fill the bins and waste computation on near-empty ciphertexts. The
+  alignment phase should run at modest $N$ (e.g.\ BFV $2^{13}$ / CKKS $2^{14}$), preserving
+  $N\ll n$.
+  \item \textbf{Bootstrap is not a dimension lift.} $N$ is fixed at key generation;
+  bootstrapping refreshes the modulus/level at the \emph{same} $N$. If deep analysis is
+  needed, one keeps alignment at small $N$ and, \emph{after} masking (alignment done),
+  ring-switches the aligned payload \emph{up} to a large ring and bootstraps there
+  (a sparse-slot, hence favorable, bootstrapping). The big-$N$ bootstrapping keys must be
+  provisioned upfront, but the shallow alignment work stays cheap at small $N$. Ring
+  switching \emph{down} (large$\to$small) is the genuinely useful direction for shrinking
+  the tail; ring switching \emph{up} grants no fresh noise budget by itself --- only the
+  subsequent bootstrap does.
+\end{itemize}
+
+\section{Real-field OKVS: conditioning instead of rank}\label{sec:real}
+
+For the payload OKVS over $\mathbb{R}$ (CKKS) we propose \emph{binary} random bands: $0/1$
+coefficients keep the homomorphic decode addition-only and keep the garbage a bounded subset
+sum. The encoding solves $M p=v$ over $\mathbb{R}$, where $M$ is $n\times m$,
+$m\approx(1+\varepsilon)n$, each row a width-$w$ binary band at a random start. Two facts
+reshape the analysis relative to the finite-field case.
+
+\paragraph{Rank transfers for free; conditioning is the new question.}
+A $0/1$ matrix that is full row rank over $\mathrm{GF}(2)$ has an $n\times n$ submatrix of
+odd determinant, which is therefore nonzero over $\mathbb{R}$; hence
+$\Pr_{\mathbb R}[\text{full rank}]\ge \Pr_{\mathrm{GF}(2)}[\text{full rank}]$, and the
+$(\varepsilon,w)$ from the finite-field analysis are a conservative choice for the rank
+event. But CKKS needs more than nonzero determinant: a full-rank $M$ with tiny $\sigmin(M)$
+still yields an exploding $\norm{p}$. The operative target is therefore a
+\emph{smallest-singular-value tail bound}
+\[
+  \Pr[\sigmin(M)<t]\le 2^{-\lambda},
+\]
+which replaces the rank-failure bound and which sets $(\varepsilon,w)$. Redundancy
+$\varepsilon$ (extra columns) is the more natural knob than $w$ for raising $\sigmin$.
+
+\paragraph{Efficient minimum-norm encoding.}
+Among all valid encodings $\{p_0+\ker M\}$ the minimum-$\ell_2$-norm solution is
+$p^\star=M^\top(MM^\top)^{-1}v$, and its size is governed precisely by $\sigmin$:
+$\norm{p^\star}\le\norm{v}/\sigmin(M)$. Crucially this is cheap to compute for band
+matrices: ordering rows by band start makes $MM^\top$ \emph{banded} (bandwidth $O(w)$), so
+$MM^\top y=v$ is solved by banded Cholesky in $O(nw^2)$ and $p^\star=M^\top y$ in $O(nw)$ ---
+comparable to the encoding itself, and far smaller in norm than the naive triangular
+particular solution (free variables set to $0$), whose norm is governed by the worse-
+conditioned pivot submatrix. (Normal equations square the condition number; a banded QR of
+$M^\top$ is the stable fallback.)
+
+\section{Open problems / next steps}
+
+\begin{problem}[$\sigmin$ tail bound]
+Prove $\Pr[\sigmin(M)<t]\le 2^{-\lambda}$ for random width-$w$ binary band matrices with
+$m=(1+\varepsilon)n$, giving the $(\varepsilon,w,t)$ trade-off. (Toolbox: sparse/structured
+$\sigmin$ bounds \`a la Rudelson--Vershynin, Litvak--Pajor--Rudelson--Tomczak-Jaegermann.)
+\end{problem}
+
+\begin{problem}[empirical conditioning]
+Measure, for binary band matrices over $\mathbb{R}$: the amplification
+$\norm{p}/\norm{v}$ for naive-triangular vs.\ banded-min-norm; $\sigmin(M)$ and its
+dependence on $(w,\varepsilon)$; and the resulting garbage magnitude
+$|\langle\row(y'),p\rangle|$ on non-matches. (Addressed by the accompanying experiment.)
+\end{problem}
+
+\begin{problem}[2-row decode]
+The $2\times(N/2)$ BGV hypercube admits, with $N/2$-based sequencing and rotation-during-
+compute, two layer products per row-wise rotation --- halving plain-mults for the indicator
+decode and resolving the open remark of \S4.3 of the base paper. The packing (offset
+alignment of paired layers; replication vs.\ windowed layout) and its
+communication/computation trade-off remain to be fixed.
+\end{problem}
+
+\end{document}
