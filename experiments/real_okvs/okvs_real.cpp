@@ -377,22 +377,25 @@ int main(int argc, char** argv){
     const int REPS = 10, NG = 256;
     uint64_t seed = 0xC0FFEE;
 
-    // Sweep A: vary w (binary, n=1024, eps=1.0)
-    for (int w : {10,12,14,16,20,24,30,40,50})
-        emit("w", BandType::Binary, 1024, 1.0, w, run_avg(1024,1.0,w,BandType::Binary,REPS,NG,seed++));
+    // DEFAULT band = Gauss (full-entropy real coefficients): better conditioning, same
+    // homomorphic-decode cost as binary (PlainMult cost is content-independent).
 
-    // Sweep B: vary eps (binary, n=1024, w=24)
+    // Sweep A: vary w (gauss, n=1024, eps=1.0)
+    for (int w : {8,10,12,14,16,20,24,30,40})
+        emit("w", BandType::Gauss, 1024, 1.0, w, run_avg(1024,1.0,w,BandType::Gauss,REPS,NG,seed++));
+
+    // Sweep B: vary eps (gauss, n=1024, w=24)
     for (double eps : {0.05,0.1,0.2,0.3,0.5,1.0,2.0})
-        emit("eps", BandType::Binary, 1024, eps, 24, run_avg(1024,eps,24,BandType::Binary,REPS,NG,seed++));
+        emit("eps", BandType::Gauss, 1024, eps, 24, run_avg(1024,eps,24,BandType::Gauss,REPS,NG,seed++));
 
-    // Sweep C: vary n (binary, eps=1.0, w=24)
+    // Sweep C: vary n (gauss, eps=1.0, w=24)
     for (int n : {256,512,1024,2048,4096})
-        emit("n", BandType::Binary, n, 1.0, 24, run_avg(n,1.0,24,BandType::Binary,REPS,NG,seed++));
+        emit("n", BandType::Gauss, n, 1.0, 24, run_avg(n,1.0,24,BandType::Gauss,REPS,NG,seed++));
 
-    // Sweep D: binary vs gauss bands (n=1024, eps=1.0)
+    // Sweep D: gauss vs binary bands (n=1024, eps=1.0) -- justifies the Gauss default
     for (int w : {12,16,24,32}) {
-        emit("band", BandType::Binary, 1024, 1.0, w, run_avg(1024,1.0,w,BandType::Binary,REPS,NG,seed++));
         emit("band", BandType::Gauss,  1024, 1.0, w, run_avg(1024,1.0,w,BandType::Gauss, REPS,NG,seed++));
+        emit("band", BandType::Binary, 1024, 1.0, w, run_avg(1024,1.0,w,BandType::Binary,REPS,NG,seed++));
     }
 
     std::fclose(f);

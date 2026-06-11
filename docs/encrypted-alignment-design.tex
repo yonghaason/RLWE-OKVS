@@ -189,25 +189,35 @@ Two further points drive the parameterization:
 
 \section{Real-field OKVS: conditioning instead of rank}\label{sec:real}
 
-For the payload OKVS over $\mathbb{R}$ (CKKS) we propose \emph{binary} random bands: $0/1$
-coefficients keep the homomorphic decode addition-only and keep the garbage a bounded subset
-sum. The encoding solves $M p=v$ over $\mathbb{R}$, where $M$ is $n\times m$,
-$m\approx(1+\varepsilon)n$, each row a width-$w$ binary band at a random start. Two facts
-reshape the analysis relative to the finite-field case.
+For the payload OKVS over $\mathbb{R}$ (CKKS) we use \emph{Gaussian} random bands: each
+width-$w$ band has i.i.d.\ $\mathcal N(0,1)$ coefficients, placed at a random start. The
+encoding solves $M p=v$ over $\mathbb{R}$, where $M$ is $n\times m$,
+$m\approx(1+\varepsilon)n$.
 
-\paragraph{Rank transfers for free; conditioning is the new question.}
-A $0/1$ matrix that is full row rank over $\mathrm{GF}(2)$ has an $n\times n$ submatrix of
-odd determinant, which is therefore nonzero over $\mathbb{R}$; hence
-$\Pr_{\mathbb R}[\text{full rank}]\ge \Pr_{\mathrm{GF}(2)}[\text{full rank}]$, and the
-$(\varepsilon,w)$ from the finite-field analysis are a conservative choice for the rank
-event. But CKKS needs more than nonzero determinant: a full-rank $M$ with tiny $\sigmin(M)$
-still yields an exploding $\norm{p}$. The operative target is therefore a
+\paragraph{Why Gaussian, not binary.}
+The earlier motivation for $0/1$ bands was an ``addition-only'' homomorphic decode, but this
+is illusory: the decode is $\sum_k \mathsf{PlainMult}(\rho_k(c),\,\mathrm{diag}_k)$, and a
+$\mathsf{PlainMult}$ costs the same whether the plaintext diagonal is $0/1$ or real (it is
+encoded into a dense plaintext polynomial and NTT-multiplied regardless); binary also gives
+no encoding-time speedup off $\mathrm{GF}(2)$. Meanwhile full-entropy real coefficients
+condition markedly better --- experimentally $\sigmin$ is $\sim\!1.7\times$ larger at equal
+$w$, so Gaussian bands reach a target $\sigmin$ with $\sim\!1/3$ fewer diagonals --- and
+admit clean random-matrix tools (continuous anti-concentration) for the analysis below.
+
+\paragraph{Rank is automatic; conditioning is the whole question.}
+For Gaussian bands full row rank holds almost surely (the only structural requirement is that
+the sparsity pattern admits a row-to-column matching, which holds once $(\varepsilon,w)$
+clear the RB-OKVS thresholds). So unlike the finite-field case there is no rank-failure event
+to bound; CKKS instead needs $\sigmin(M)$ bounded \emph{away from $0$}, since a full-rank $M$
+with tiny $\sigmin$ already yields an exploding $\norm{p}$. The operative target is a
 \emph{smallest-singular-value tail bound}
 \[
   \Pr[\sigmin(M)<t]\le 2^{-\lambda},
 \]
-which replaces the rank-failure bound and which sets $(\varepsilon,w)$. Redundancy
-$\varepsilon$ (extra columns) is the more natural knob than $w$ for raising $\sigmin$.
+which replaces the finite-field rank-failure bound and which sets $(\varepsilon,w)$; a proof
+sketch is given in Section~\ref{sec:sigmin}. Redundancy $\varepsilon$ (extra columns) is the
+primary knob --- it sets the spectral gap $\sigmin\gtrsim\sqrt m-\sqrt n$ --- with $w$
+secondary, as the experiments confirm.
 
 \paragraph{Efficient minimum-norm encoding.}
 Among all valid encodings $\{p_0+\ker M\}$ the minimum-$\ell_2$-norm solution is
@@ -220,19 +230,104 @@ particular solution (free variables set to $0$), whose norm is governed by the w
 conditioned pivot submatrix. (Normal equations square the condition number; a banded QR of
 $M^\top$ is the stable fallback.)
 
+\section{A proof sketch for the $\sigmin$ tail bound}\label{sec:sigmin}
+
+We sketch the route to $\Pr[\sigmin(M)<t]\le 2^{-\lambda}$; constants and the precise
+threshold $t=t(\varepsilon,w)$ are deferred, and the empirical $(\varepsilon,w)\mapsto\sigmin$
+surface of the accompanying experiment is what they must fit. The model: $M\in\mathbb
+R^{n\times m}$, $m=(1+\varepsilon)n$; row $i$ is supported on the window $[a_i,a_i+w)$ with
+$a_i\sim U[0,m-w]$ i.i.d., and the $w$ in-band entries are i.i.d.\ $\mathcal N(0,1)$. Write
+$r_1,\dots,r_n$ for the rows. Since $n\le m$,
+\[
+  \sigmin(M)=\min_{u\in S^{n-1}}\norm{M^\top u}_2,\qquad
+  M^\top u=\sum_{i=1}^n u_i\,r_i\ \in\mathbb R^m,
+\]
+and we must show this minimum is $\gtrsim t$ with high probability. We use the
+small-ball / $\varepsilon$-net method of Rudelson--Vershynin and Litvak--Pajor--Rudelson--
+Tomczak-Jaegermann, where the band structure enters through \emph{column independence}.
+
+\paragraph{Step 1 (column independence --- the structural heart).}
+Condition on the starts $\{a_i\}$. The $j$-th coordinate of $M^\top u$ is
+$(M^\top u)_j=\sum_{i:\,j\in[a_i,a_i+w)} u_i\,M_{ij}$. Distinct columns use disjoint sets of
+the i.i.d.\ Gaussian entries, so the coordinates $\{(M^\top u)_j\}_{j\in[m]}$ are
+\emph{independent}, with
+\[
+  (M^\top u)_j\sim\mathcal N\!\big(0,\,s_j^2(u)\big),\qquad
+  s_j^2(u)=\!\!\sum_{i:\,j\in[a_i,a_i+w)}\!\!u_i^2,\qquad
+  \sum_{j=1}^m s_j^2(u)=\sum_i u_i^2\,w=w .
+\]
+Thus $\norm{M^\top u}^2=\sum_j s_j^2(u)\,Z_j^2$ is a sum of \emph{independent} terms with mean
+$w$. Band sparsity is exactly what makes the image coordinates independent --- this is what a
+dense-matrix argument gets for free and a general sparse matrix does not.
+
+\paragraph{Step 2 (single-direction small ball, by tensorization).}
+For a fixed $u$, the independence of the coordinates lets us tensorize the per-coordinate
+Gaussian anti-concentration $\Pr[|(M^\top u)_j|\le\rho\,s_j(u)]\le C\rho$: by the
+Rudelson--Vershynin tensorization lemma,
+\[
+  \Pr\!\big[\norm{M^\top u}\le \rho\,\sqrt{\textstyle\sum_j s_j^2(u)}\big]
+  \;\le\;(C\rho)^{\,\kappa(u)},
+\]
+where $\kappa(u)=\#\{j:s_j^2(u)>0\}$ is the number of \emph{active columns} --- the size of
+the union of the bands of the rows on which $u$ is supported. The exponent is therefore the
+column-spread of the direction; this is the quantity the redundancy $\varepsilon$ and width
+$w$ control.
+
+\paragraph{Step 3 (incompressible / compressible split).}
+Decompose $S^{n-1}$ into spread and sparse directions (Rudelson--Vershynin):
+\begin{itemize}[leftmargin=*,topsep=2pt]
+  \item \emph{Incompressible $u$:} a constant fraction of the mass sits on $\Theta(n)$
+  coordinates, so the active bands cover $\kappa(u)=\Theta(m)=\Theta((1+\varepsilon)n)$
+  columns; Step 2 gives a single-direction bound $(C\rho)^{\Theta(n)}=e^{-\Theta(n)}$, which
+  beats the $e^{O(n)}$ cardinality of an $\varepsilon$-net of the sphere (for $\varepsilon$
+  bounded below). With $\norm{M^\top\cdot}$ being $\sigma_{\max}(M)$-Lipschitz and
+  $\sigma_{\max}=O(\sqrt w+\sqrt{m})$ w.h.p., a union bound controls all incompressible
+  directions and yields $\norm{M^\top u}\gtrsim \sqrt m-\sqrt n$ there.
+  \item \emph{Compressible $u$ ($\approx k$-sparse):} the $k$-sparse net has only
+  $e^{O(k\log(m/k))}$ points, while a $k$-sparse direction still activates
+  $\kappa(u)=\Omega(w)$ columns (its bands are nearly disjoint for random starts), giving a
+  per-point small ball $e^{-\Omega(w)}$. Balancing $k\log(m/k)$ against $w$ closes the union
+  bound once $w=\Omega(\log n)$, with failure $e^{-\Omega(w)}$.
+\end{itemize}
+
+\paragraph{Step 4 (the random sparsity pattern is good).}
+Steps~1--3 condition on $\{a_i\}$ and need the pattern ``well spread'': every column is
+covered by $O\!\big(w/(1+\varepsilon)\big)$ bands and every union of $k$ bands covers
+$\Omega(\min(kw,m))$ columns. As $a_i\sim U[0,m-w]$ i.i.d., these are balls-into-bins
+statements holding except with probability $e^{-\Omega(w)}$ (Chernoff), absorbed into the
+budget.
+
+\paragraph{Conclusion.}
+Combining, there are constants $c,c'$ and a threshold $t_0=t_0(\varepsilon)$ of order
+$\sqrt m-\sqrt n=\sqrt n\,(\sqrt{1+\varepsilon}-1)$ such that
+\[
+  \Pr\big[\,\sigmin(M)< c\,t_0\,\big]\;\le\;e^{-c'\min(n,\,w)} .
+\]
+The two parameters play distinct roles: $\varepsilon$ fixes the conditioning \emph{scale}
+$t_0$ (the spectral gap) and powers the incompressible exponent, while $w$ powers the
+compressible exponent and the good-pattern event. Taking $\varepsilon$ a constant bounded
+below and $w=\Omega(\lambda)$ gives $\Pr[\sigmin<c\,t_0]\le 2^{-\lambda}$. This matches the
+experiment, where $\sigmin$ rises with both $w$ and $\varepsilon$ and collapses to $\approx0$
+as $\varepsilon\to0$ (the near-square regime), and where Gaussian coefficients --- whose
+anti-concentration in Step~2 is the clean Gaussian small ball --- outperform binary ones
+(which would instead need a Carbery--Wright / Berry--Esseen anti-concentration input).
+
 \section{Open problems / next steps}
 
-\begin{problem}[$\sigmin$ tail bound]
-Prove $\Pr[\sigmin(M)<t]\le 2^{-\lambda}$ for random width-$w$ binary band matrices with
-$m=(1+\varepsilon)n$, giving the $(\varepsilon,w,t)$ trade-off. (Toolbox: sparse/structured
-$\sigmin$ bounds \`a la Rudelson--Vershynin, Litvak--Pajor--Rudelson--Tomczak-Jaegermann.)
+\begin{problem}[$\sigmin$ tail bound --- make the sketch rigorous]
+Turn Section~\ref{sec:sigmin} into a theorem: pin the constants $c,c'$ and threshold
+$t_0(\varepsilon)$ in $\Pr[\sigmin(M)<c\,t_0]\le e^{-c'\min(n,w)}$ for random width-$w$
+\emph{Gaussian} band matrices with $m=(1+\varepsilon)n$, giving an explicit
+$(\varepsilon,w)\mapsto t$ trade-off matching the measured surface. The compressible-net
+balancing (Step~3) and the good-pattern event (Step~4) are the parts needing care.
 \end{problem}
 
 \begin{problem}[empirical conditioning]
-Measure, for binary band matrices over $\mathbb{R}$: the amplification
+Measure, for Gaussian band matrices over $\mathbb{R}$: the amplification
 $\norm{p}/\norm{v}$ for naive-triangular vs.\ banded-min-norm; $\sigmin(M)$ and its
 dependence on $(w,\varepsilon)$; and the resulting garbage magnitude
-$|\langle\row(y'),p\rangle|$ on non-matches. (Addressed by the accompanying experiment.)
+$|\langle\row(y'),p\rangle|$ on non-matches. (Addressed by the accompanying experiment, which
+also confirms Gaussian bands beat binary at equal $w$.)
 \end{problem}
 
 \begin{problem}[2-row decode]
