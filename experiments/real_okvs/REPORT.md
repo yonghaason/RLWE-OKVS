@@ -232,11 +232,41 @@ bits at scale `2⁴⁰` — consistent with CKKS's effective precision after a p
 `|v′−v| ≤ √w·η` then gives the observed magnitude). For deeper payload precision, raise the
 scale / modulus.
 
+## Multi-block N-spacing (true RSB)
+
+[`ckks_decode_multiblock.cpp`](ckks_decode_multiblock.cpp) extends the above to `m = b·N`
+(`b` blocks, `p` in `b` ciphertexts), i.e. the real RSB with the `π_N` column permutation.
+A band element of the contiguous-start-`s` query touches block `(s+j) mod b`, **wrap-level**
+`r = (s%b + j) div b`, at output slot `τ = s div b`; crossing a block boundary shifts the
+slot by `+1` — the super-diagonal — handled by the homomorphic rotation `rot_r`. The decode
+of a layer is
+
+```
+out = Σ_{blk, r}  rotate(c_blk, r)  ⊙  diag_{blk,r}
+```
+
+with `rot_r(c_blk)` computed **once** by Galois-key rotation and reused across all layers.
+Queries are sequenced into layers by `τ` (naive: one query per slot per layer). Run
+(`ring = 2¹³`, `N = 4096`, `b = 8`, `m = 32768`, `n = 16384`, `ε = 1`, `w = 32`, scale `2⁴⁰`):
+
+| quantity | value |
+|---|---|
+| `‖p*‖/‖v‖` | **0.268** |
+| layers (naive sequencing) | 13 |
+| ciphertexts / rotations | 8 base + **32 homomorphic rotations** (8 blocks × 4 wrap-levels) |
+| decode `max‖v′−v‖` / `rms` | `5.1×10⁻⁶` / `1.5×10⁻⁷` |
+| **precision preserved** | **≈ 22.7 bits** |
+
+**All 16 384 queries verified `v′ = v`** — the multi-block N-spaced decode with rotation keys
+is correct end-to-end. (Precision is ~23 bits here, slightly better than the single-block run
+because `‖p‖` is smaller.)
+
 **Deferred (next steps), as planned:**
-- collisions among query starts → sequencing into layers;
-- `m > N` → N-spacing across multiple blocks (true RSB), reusing each rotation across layers;
+- **sequencing optimization** — currently naive (one query/slot/layer → 13 layers at
+  `n/N=4`); the paper's clustered Algorithm 3 reduces this to `O(n/N)` layers with `w+ζ`
+  diagonals each;
 - **garbage removal** (indicator OKVS + ssPMT share + the single ctxt×ctxt mask) — the
-  decode here delivers `⟨row(y),p⟩` for *every* slot, payload on matches and garbage on
+  decode delivers `⟨row(y),p⟩` for *every* slot, payload on matches and garbage on
   non-matches; masking off the garbage is the next implementation milestone.
 
 Build:

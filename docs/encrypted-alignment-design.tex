@@ -267,12 +267,16 @@ Algorithms~\ref{alg:encode-real} and~\ref{alg:homdecode}.
 \end{algorithmic}
 \end{algorithm}
 
-\begin{remark}[garbage removal is deferred in the current implementation]\label{rmk:garbage}
+\begin{remark}[implementation status]\label{rmk:garbage}
 The accompanying CKKS implementation realizes Algorithms~\ref{alg:encode-real}
-and~\ref{alg:homdecode} only --- the encode/decode round-trip that delivers
-$\langle\row(y_j),p\rangle$ in the encrypted state. Masking off the non-match garbage
-(lines~4--6 of Algorithm~\ref{alg:align}, which need the indicator OKVS and the
-ciphertext$\times$ciphertext multiply) is left as the next implementation step.
+and~\ref{alg:homdecode}: the encode/decode round-trip that delivers
+$\langle\row(y_j),p\rangle$ in the encrypted state, including the multi-block $N$-spacing
+($m=bN$) with Galois-key homomorphic rotations for the super-diagonals (rotation by $r$
+computed once per block, reused across layers), verified correct for all queries at scale
+$2^{40}$. Deferred: the \emph{clustered} sequencing of Algorithm~3 of the base paper (the
+current sequencing is naive, one query per slot per layer), and masking off the non-match
+garbage (lines~4--6 of Algorithm~\ref{alg:align}, needing the indicator OKVS and the
+ciphertext$\times$ciphertext multiply).
 \end{remark}
 
 \section{The $\sigmin$ tail bound}\label{sec:sigmin}

@@ -1,4 +1,5 @@
 okvs_real
 failprob
 ckks_decode
+ckks_decode_multiblock
 *.o
