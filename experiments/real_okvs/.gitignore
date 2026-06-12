@@ -1,2 +1,4 @@
 okvs_real
+failprob
+ckks_decode
 *.o

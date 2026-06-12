@@ -5,6 +5,8 @@
 \usepackage{hyperref}
 \usepackage{xcolor}
 \usepackage{mathtools}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
 
 \newcommand{\R}{\mathcal{R}}
 \newcommand{\Rcv}{\mathsf{R}}
@@ -27,6 +29,10 @@
 \author{Working notes}
 \date{\today}
 
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\newtheorem{lemma}{Lemma}
 \theoremstyle{definition}
 \newtheorem{remark}{Remark}
 \newtheorem{problem}{Open problem}
@@ -93,51 +99,52 @@ $b_{X,i}\oplus b_{Y,i}=\mathbf 1(y_i\in X)$. We reuse this verbatim for the indi
 
 \section{The alignment construction}
 
-\subsection{From indicator to payload: two OKVS instances}
+The construction runs \emph{two} OKVS instances on the same OPRF'd keys
+$k_i=\OPRF(\mathsf{ID}_i)$: an \emph{indicator} OKVS over a finite field (all values $=\IS$,
+exactly the base protocol, used only to obtain membership shares), and a \emph{payload}
+OKVS whose value for $k_i$ is $\mathsf{payload}_i$, decoded homomorphically so that $\Snd$
+holds a ciphertext whose slot for $y_j$ contains $\mathsf{payload}_i$ on a match and
+pseudorandom garbage on a non-match. A generic payload no longer self-certifies membership
+(garbage is indistinguishable from a real payload), which is exactly why the separate
+indicator is needed: it provides a secret-shared membership bit with which the garbage is
+masked off. The receiver-side encoding is Algorithm~\ref{alg:encode}; the sender-side
+alignment-and-masking is Algorithm~\ref{alg:align}.
 
-Replace the single all-$\IS$ OKVS by \emph{two} OKVS instances sharing the same keys
-$k_i=\OPRF(\mathsf{ID}_i)$:
-\begin{itemize}[leftmargin=*]
-  \item an \emph{indicator} OKVS over a finite field (values all $=\IS$, or all $=1$), used
-  exactly as in the base protocol to produce the membership shares $b_{X,i},b_{Y,i}$;
-  \item a \emph{payload} OKVS whose value for key $k_i$ is $\mathsf{payload}_i$, decoded
-  homomorphically so that $\Snd$ holds an RLWE ciphertext whose slot for $y_j$ contains
-  $\mathsf{payload}_i$ (match) or pseudorandom garbage (non-match).
-\end{itemize}
-With a generic payload, the decoded value alone no longer certifies membership (garbage is
-indistinguishable from a real payload), which is exactly why the separate indicator is
-needed.
+\begin{algorithm}[h]
+\caption{$\Pi.\mathsf{Encode}$ --- receiver $\Rcv$, on table $\{(\mathsf{ID}_i,\mathsf{payload}_i)\}_{i\in[n_x]}$}
+\label{alg:encode}
+\begin{algorithmic}[1]
+\State $k_i \gets \OPRF(\mathsf{ID}_i)$ for all $i$ \Comment{OPRF preprocessing (R is OPRF receiver)}
+\State $\IS \gets$ random indicator tag
+\State $p^{\mathrm{ind}} \gets \textsc{Okvs.Encode}_{\Zp}\big(\{(k_i,\IS)\}_i\big)$ \Comment{indicator OKVS, finite field}
+\State $p^{\mathrm{pay}} \gets \textsc{Okvs.Encode}_{\mathbb R}\big(\{(k_i,\mathsf{payload}_i)\}_i\big)$ \Comment{payload OKVS, min-norm solve (Alg.~\ref{alg:encode-real})}
+\State $C^{\mathrm{ind}} \gets \mathsf{BGV.Enc}(p^{\mathrm{ind}})$,\quad $C^{\mathrm{pay}} \gets \mathsf{CKKS.Enc}(p^{\mathrm{pay}})$ \Comment{block-packed}
+\State \textbf{send} $C^{\mathrm{ind}}, C^{\mathrm{pay}}$ to $\Snd$ \Comment{(rotation/Galois keys for the spaced-band decode are sent in setup)}
+\end{algorithmic}
+\end{algorithm}
 
-\subsection{Removing the garbage without leaking the join}
+\begin{algorithm}[h]
+\caption{$\Pi.\mathsf{Align}$ --- sender $\Snd$, on set $\{y_j\}_{j\in[n_y]}$ (and $\Rcv$'s share step)}
+\label{alg:align}
+\begin{algorithmic}[1]
+\State $(c^{\mathrm{ind}}_\mu)_\mu \gets \textsc{HomDecode}(C^{\mathrm{ind}}, \{y_j\})$ \Comment{base-protocol indicator decode}
+\State $(c^{\mathrm{pay}}_\mu)_\mu \gets \textsc{HomDecode}(C^{\mathrm{pay}}, \{y_j\})$ \Comment{CKKS spaced-band decode, Alg.~\ref{alg:homdecode}}
+\State run ssPMT on $(c^{\mathrm{ind}}_\mu)_\mu$: $\Snd$ gets share $b_{Y,j}$, $\Rcv$ gets $b_{X,j}$, with $b_{X,j}\oplus b_{Y,j}=\mathbf 1(y_j\in X)$
+\Statex \hrulefill\ \emph{garbage removal (deferred; see Section~\ref{sec:real} note)} \hrulefill
+\State $\Rcv$ \textbf{sends} $\Enc_{\mathrm{CKKS}}(b_{X,j})$, packed into the payload slot layout
+\State $\Snd$ sets $s_j \gets b_{Y,j}$ and forms $\Enc(b_j) \gets \PlainAdd\big(\PlainMult(\Enc(b_{X,j}),\,1-2s_j),\ s_j\big)$ \Comment{XOR by a \emph{plaintext} bit: no ctxt$\times$ctxt}
+\State $\Snd$ computes $\Enc(\widetilde{\mathsf{payload}}_j) \gets \Enc(b_j)\odot c^{\mathrm{pay}}_{(\cdot)}[j]$ \Comment{the single ctxt$\times$ctxt mult; $1\!\cdot\!\mathsf{payload}$ or $0\!\cdot\!\text{garbage}$}
+\State \Return aligned $\{\Enc(\widetilde{\mathsf{payload}}_j)\}_j$ \Comment{$\Snd$ runs its analysis; circuit-privacy/noise-flood before $\Rcv$ decrypts}
+\end{algorithmic}
+\end{algorithm}
 
-After the indicator ssPMT, $\Snd$ holds the garbage-laden payload ciphertext, its own share
-$b_{Y,i}$, and knows the slot of each $y_j$; $\Rcv$ holds $b_{X,i}$. Let $b_i=b_{X,i}\oplus
-b_{Y,i}$ be the (secret) membership bit. To zero out non-matches while keeping $b_i$ hidden
-from both parties:
-\begin{enumerate}[leftmargin=*]
-  \item $\Rcv$ encrypts its share $b_{X,i}$ (packed into the payload slot layout) and sends
-  $\Enc(b_{X,i})$ to $\Snd$.
-  \item $\Snd$ forms $\Enc(b_i)$ \emph{using only plaintext operations}, because its own
-  share $s:=b_{Y,i}$ is a known constant per slot:
-  \begin{equation}\label{eq:xor}
-    b_i = b_{X,i}\oplus s = (1-2s)\,b_{X,i} + s
-    \;\;\Longrightarrow\;\;
-    \Enc(b_i)=\PlainAdd\!\big(\PlainMult(\Enc(b_{X,i}),\,1-2s),\ s\big).
-  \end{equation}
-  (Note $a\oplus b=a+b-2ab$, not $a+b-ab$; the latter is OR.) No
-  ciphertext$\times$ciphertext product is needed here.
-  \item $\Snd$ multiplies the membership ciphertext by the payload ciphertext:
-  \[
-    \Enc(\widetilde{\mathsf{payload}})
-    = \Enc(b_i)\odot \Enc(\mathsf{payload}\text{-or-garbage}).
-  \]
-  This is the \emph{single} ciphertext$\times$ciphertext multiplication of the construction:
-  on a match it returns $\mathsf{payload}$, on a non-match $0\cdot\text{garbage}$.
-\end{enumerate}
-The membership bit never appears in the clear to either party, so the join pattern is
-hidden from $\Snd$. The masking multiplication takes the protocol out of the base paper's
-``additive-only'' regime by exactly one multiplicative level (plus relinearization),
-which must be accounted for in the modulus budget.
+Two facts about Algorithm~\ref{alg:align}. The XOR in line~5 uses $a\oplus b=a+b-2ab$ (not
+$a+b-ab$, which is OR); since $\Snd$'s share $s_j$ is a \emph{plaintext} bit, line~5 is a
+plaintext multiply-add, with \emph{no} ciphertext$\times$ciphertext product. Line~6 is the
+\emph{only} ciphertext$\times$ciphertext multiplication --- it takes the protocol out of the
+base paper's additive-only regime by one multiplicative level (plus relinearization), to be
+budgeted in the modulus. The membership bit $b_j$ never appears in the clear to either party,
+so the join pattern stays hidden from $\Snd$.
 
 \begin{remark}[circuit privacy]
 Since $\Snd$'s computation touches the ciphertext before $\Rcv$ decrypts the final analysis
@@ -149,8 +156,8 @@ the base protocol does on its returned ciphertexts.
 Real-world payloads are typically real numbers, so the payload OKVS is naturally carried in
 CKKS while the indicator/equality logic stays in BGV/BFV. The re-encryption of $b_{X,i}$ into
 CKKS is free: the share is plaintext to its holder, so no scheme-switching
-primitive is required --- $\Rcv$ simply CKKS-encrypts a fresh $0/1$, and \eqref{eq:xor} runs
-in CKKS. The only semantic change from the BGV masking is that \emph{exact} zeroing becomes
+primitive is required --- $\Rcv$ simply CKKS-encrypts a fresh $0/1$, and the plaintext-bit
+XOR of Algorithm~\ref{alg:align} (line~5) runs in CKKS. The only semantic change from the BGV masking is that \emph{exact} zeroing becomes
 \emph{approximate}: with $b_i=0\pm\delta$, a non-match leaves a residual $\delta\cdot
 \text{garbage}$. Hence the central numerical requirement:
 \[
@@ -228,98 +235,127 @@ $MM^\top y=v$ is solved by banded Cholesky in $O(nw^2)$ and $p^\star=M^\top y$ i
 comparable to the encoding itself, and far smaller in norm than the naive triangular
 particular solution (free variables set to $0$), whose norm is governed by the worse-
 conditioned pivot submatrix. (Normal equations square the condition number; a banded QR of
-$M^\top$ is the stable fallback.)
+$M^\top$ is the stable fallback.) The encoding and the spaced-band homomorphic decode are
+Algorithms~\ref{alg:encode-real} and~\ref{alg:homdecode}.
 
-\section{A proof sketch for the $\sigmin$ tail bound}\label{sec:sigmin}
+\begin{algorithm}[h]
+\caption{$\textsc{Okvs.Encode}_{\mathbb R}$ --- minimum-norm real-field OKVS encoding}
+\label{alg:encode-real}
+\begin{algorithmic}[1]
+\Require keys $\{k_i\}_{i\in[n]}$, values $v\in\mathbb R^n$, width $w$, expansion $\varepsilon$ ($m=\lceil(1+\varepsilon)n\rceil$)
+\State for each $i$: start $a_i\gets H_1(k_i)\in[0,m{-}w]$; in-band coeffs $(M_{i,a_i+j})_{j<w}\gets H_2(k_i)\sim\mathcal N(0,1)$
+\State sort rows by $a_i$ and form the banded SPD Gram matrix $G=MM^\top$ (bandwidth $O(w)$)
+\State $G=LL^\top$ \Comment{banded Cholesky, $O(nw^2)$; SPD $\Rightarrow$ pivot-free, stable}
+\State solve $LL^\top y=v$ by two banded triangular solves \Comment{$O(nw)$}
+\State \Return $p^\star=M^\top y$ \Comment{min-norm solution; $\norm{p^\star}\le\norm{v}/\sigmin(M)$}
+\end{algorithmic}
+\end{algorithm}
 
-We sketch the route to $\Pr[\sigmin(M)<t]\le 2^{-\lambda}$; constants and the precise
-threshold $t=t(\varepsilon,w)$ are deferred, and the empirical $(\varepsilon,w)\mapsto\sigmin$
-surface of the accompanying experiment is what they must fit. The model: $M\in\mathbb
-R^{n\times m}$, $m=(1+\varepsilon)n$; row $i$ is supported on the window $[a_i,a_i+w)$ with
-$a_i\sim U[0,m-w]$ i.i.d., and the $w$ in-band entries are i.i.d.\ $\mathcal N(0,1)$. Write
-$r_1,\dots,r_n$ for the rows. Since $n\le m$,
+\begin{algorithm}[h]
+\caption{$\textsc{HomDecode}_{\mathrm{CKKS}}$ --- spaced-band decode, rotation-key variant}
+\label{alg:homdecode}
+\begin{algorithmic}[1]
+\Require CKKS ciphertexts $(c_0,\dots,c_{b-1})$ of $p=(p_0\Vert\cdots\Vert p_{b-1})$, $p_i\in\mathbb R^{N}$ ($N$ slots, $b=m/N$); query keys $\{y_j\}$; Galois (rotation) keys
+\State build the RSB query matrix $M'$ from $\{y_j\}$ ($N$-spaced bands); diagonalize and sequence into layers $\{\bar M_t\}$, each with offset set $D_t\subseteq\{0,\dots,w{+}\zeta{-}1\}$
+\For{each distinct offset $k\in\bigcup_t D_t$}
+  \State $\rho_k \gets \textsc{HomRotate}(c_{\bullet},\,k)$ \Comment{homomorphic rotation via Galois key, computed \emph{once}, reused across layers}
+\EndFor
+\For{each layer $t$}
+  \State $c^{*}_t \gets \sum_{k\in D_t}\PlainMult(\rho_k,\ \mathrm{diag}_{t,k})$ \Comment{$w{+}\zeta$ slot-wise plain-mult/adds}
+\EndFor
+\State \Return $\{c^{*}_t\}_t$ \Comment{slot of $y_j$ holds $\langle\row(y_j),p\rangle=$ payload (match) or garbage (non-match)}
+\end{algorithmic}
+\end{algorithm}
+
+\begin{remark}[garbage removal is deferred in the current implementation]\label{rmk:garbage}
+The accompanying CKKS implementation realizes Algorithms~\ref{alg:encode-real}
+and~\ref{alg:homdecode} only --- the encode/decode round-trip that delivers
+$\langle\row(y_j),p\rangle$ in the encrypted state. Masking off the non-match garbage
+(lines~4--6 of Algorithm~\ref{alg:align}, which need the indicator OKVS and the
+ciphertext$\times$ciphertext multiply) is left as the next implementation step.
+\end{remark}
+
+\section{The $\sigmin$ tail bound}\label{sec:sigmin}
+
+\paragraph{Model.} $M\in\mathbb R^{n\times m}$, $m=\lceil(1+\varepsilon)n\rceil$; row $i$ is
+supported on $[a_i,a_i+w)$ with $a_i\sim U[0,m-w]$ i.i.d., and the $w$ in-band entries are
+i.i.d.\ $\mathcal N(0,1)$. We write $r_1,\dots,r_n$ for the rows.
+
+\begin{theorem}[Conditioning of Gaussian band matrices]\label{thm:sigmin}
+Fix $\varepsilon_0\in(0,1]$. There are constants $c_1,c_2,c_3>0$ depending only on
+$\varepsilon_0$ such that for every $n$, every $\varepsilon\ge\varepsilon_0$, and every width
+$c_1\log n\le w\le n$, the model above satisfies
 \[
-  \sigmin(M)=\min_{u\in S^{n-1}}\norm{M^\top u}_2,\qquad
-  M^\top u=\sum_{i=1}^n u_i\,r_i\ \in\mathbb R^m,
+   \Pr\big[\,\sigmin(M)<c_2\,\big]\;\le\;e^{-c_3\,\min(\varepsilon n,\,w)} .
 \]
-and we must show this minimum is $\gtrsim t$ with high probability. We use the
-small-ball / $\varepsilon$-net method of Rudelson--Vershynin and Litvak--Pajor--Rudelson--
-Tomczak-Jaegermann, where the band structure enters through \emph{column independence}.
+More precisely there is a threshold $t(\varepsilon,w)$, non-decreasing in both arguments and
+bounded below by $c_2>0$, with $\Pr[\sigmin(M)<t(\varepsilon,w)]\le e^{-c_3\min(\varepsilon n,w)}$.
+In particular $\sigmin(M)$ is bounded away from $0$ by a constant \emph{independent of $n$}
+with probability $1-e^{-\Omega(\min(\varepsilon n,w))}$: the conditioning does not degrade with
+set size.
+\end{theorem}
 
-\paragraph{Step 1 (column independence --- the structural heart).}
-Condition on the starts $\{a_i\}$. The $j$-th coordinate of $M^\top u$ is
-$(M^\top u)_j=\sum_{i:\,j\in[a_i,a_i+w)} u_i\,M_{ij}$. Distinct columns use disjoint sets of
-the i.i.d.\ Gaussian entries, so the coordinates $\{(M^\top u)_j\}_{j\in[m]}$ are
-\emph{independent}, with
-\[
-  (M^\top u)_j\sim\mathcal N\!\big(0,\,s_j^2(u)\big),\qquad
-  s_j^2(u)=\!\!\sum_{i:\,j\in[a_i,a_i+w)}\!\!u_i^2,\qquad
-  \sum_{j=1}^m s_j^2(u)=\sum_i u_i^2\,w=w .
-\]
-Thus $\norm{M^\top u}^2=\sum_j s_j^2(u)\,Z_j^2$ is a sum of \emph{independent} terms with mean
-$w$. Band sparsity is exactly what makes the image coordinates independent --- this is what a
-dense-matrix argument gets for free and a general sparse matrix does not.
+The bound is governed by $\min(\varepsilon n, w)$. For the set sizes of interest $\varepsilon
+n\gg w$, so the binding term is $w$: $\log\Pr[\text{ill-conditioned}]\approx -c_3 w$ is
+\emph{linear in $w$}, and a target failure $2^{-\lambda}$ needs $w=\Omega(\lambda)$ --- the
+prediction tested empirically in the companion experiment. The next corollary turns the
+$\sigmin$ bound into the two quantities the construction actually needs: a bounded encoding
+and a bounded encode/decode precision loss.
 
-\paragraph{Step 2 (single-direction small ball, by tensorization).}
-For a fixed $u$, the independence of the coordinates lets us tensorize the per-coordinate
-Gaussian anti-concentration $\Pr[|(M^\top u)_j|\le\rho\,s_j(u)]\le C\rho$: by the
-Rudelson--Vershynin tensorization lemma,
-\[
-  \Pr\!\big[\norm{M^\top u}\le \rho\,\sqrt{\textstyle\sum_j s_j^2(u)}\big]
-  \;\le\;(C\rho)^{\,\kappa(u)},
-\]
-where $\kappa(u)=\#\{j:s_j^2(u)>0\}$ is the number of \emph{active columns} --- the size of
-the union of the bands of the rows on which $u$ is supported. The exponent is therefore the
-column-spread of the direction; this is the quantity the redundancy $\varepsilon$ and width
-$w$ control.
+\begin{corollary}[Bounded encoding and round-trip precision]\label{cor:precision}
+Under Theorem~\ref{thm:sigmin}, except with probability $e^{-c_3\min(\varepsilon n,w)}$:
+\begin{enumerate}[label=(\roman*),leftmargin=*,topsep=2pt]
+  \item the min-norm encoding obeys $\norm{p^\star}\le \norm{v}/c_2$, a bound independent of
+  $n$ (so the CKKS garbage $|\langle\row(y'),p^\star\rangle|\le\sqrt w\,\norm{p^\star}$ is
+  likewise $O(\sqrt w\,\norm v)$);
+  \item if $\Snd$ decodes from the CKKS ciphertext of $p^\star$ held with error
+  $\tilde p=p^\star+e$, $\norm e_2\le\eta$, then every matching query $y_j=x_i$ recovers
+  \[
+     v'_j=\langle\row(y_j),\tilde p\rangle = v_i + \langle\row(y_j),e\rangle,\qquad
+     |v'_j-v_i|\le \norm{\row(y_j)}_2\,\eta=\Theta(\sqrt w)\,\eta .
+  \]
+\end{enumerate}
+Hence preserving $b$ bits of payload precision through the encode/decode round-trip costs
+$\approx \tfrac12\log_2 w+\log_2(1/\sigmin)=O\!\big(\log(\sqrt w/\sigmin)\big)$ extra bits of
+CKKS scale --- the $1/\sigmin$ factor is the encoding's norm inflation, the $\sqrt w$ the
+band-sum amplification.
+\end{corollary}
 
-\paragraph{Step 3 (incompressible / compressible split).}
-Decompose $S^{n-1}$ into spread and sparse directions (Rudelson--Vershynin):
-\begin{itemize}[leftmargin=*,topsep=2pt]
-  \item \emph{Incompressible $u$:} a constant fraction of the mass sits on $\Theta(n)$
-  coordinates, so the active bands cover $\kappa(u)=\Theta(m)=\Theta((1+\varepsilon)n)$
-  columns; Step 2 gives a single-direction bound $(C\rho)^{\Theta(n)}=e^{-\Theta(n)}$, which
-  beats the $e^{O(n)}$ cardinality of an $\varepsilon$-net of the sphere (for $\varepsilon$
-  bounded below). With $\norm{M^\top\cdot}$ being $\sigma_{\max}(M)$-Lipschitz and
-  $\sigma_{\max}=O(\sqrt w+\sqrt{m})$ w.h.p., a union bound controls all incompressible
-  directions and yields $\norm{M^\top u}\gtrsim \sqrt m-\sqrt n$ there.
-  \item \emph{Compressible $u$ ($\approx k$-sparse):} the $k$-sparse net has only
-  $e^{O(k\log(m/k))}$ points, while a $k$-sparse direction still activates
-  $\kappa(u)=\Omega(w)$ columns (its bands are nearly disjoint for random starts), giving a
-  per-point small ball $e^{-\Omega(w)}$. Balancing $k\log(m/k)$ against $w$ closes the union
-  bound once $w=\Omega(\log n)$, with failure $e^{-\Omega(w)}$.
-\end{itemize}
+\begin{proof}[Proof of Corollary~\ref{cor:precision}]
+(i) is $\norm{p^\star}\le\norm v/\sigmin(M)\le\norm v/c_2$ on the high-probability event of
+Theorem~\ref{thm:sigmin}, and $|\langle\row(y'),p^\star\rangle|\le\norm{\row(y')}\norm{p^\star}$
+with $\norm{\row(y')}=\Theta(\sqrt w)$. (ii): for a matching key $\row(y_j)=\row(x_i)$, so
+$\langle\row(y_j),p^\star\rangle=v_i$ by OKVS correctness; the error is
+$\langle\row(y_j),e\rangle$, bounded by Cauchy--Schwarz. The bit count follows by setting
+$\sqrt w\,\eta$ below the payload LSB and noting $\eta$ scales with $\norm{p^\star}$, which
+carries the $1/\sigmin$ factor.
+\end{proof}
 
-\paragraph{Step 4 (the random sparsity pattern is good).}
-Steps~1--3 condition on $\{a_i\}$ and need the pattern ``well spread'': every column is
-covered by $O\!\big(w/(1+\varepsilon)\big)$ bands and every union of $k$ bands covers
-$\Omega(\min(kw,m))$ columns. As $a_i\sim U[0,m-w]$ i.i.d., these are balls-into-bins
-statements holding except with probability $e^{-\Omega(w)}$ (Chernoff), absorbed into the
-budget.
-
-\paragraph{Conclusion.}
-Combining, there are constants $c,c'$ and a threshold $t_0=t_0(\varepsilon)$ of order
-$\sqrt m-\sqrt n=\sqrt n\,(\sqrt{1+\varepsilon}-1)$ such that
-\[
-  \Pr\big[\,\sigmin(M)< c\,t_0\,\big]\;\le\;e^{-c'\min(n,\,w)} .
-\]
-The two parameters play distinct roles: $\varepsilon$ fixes the conditioning \emph{scale}
-$t_0$ (the spectral gap) and powers the incompressible exponent, while $w$ powers the
-compressible exponent and the good-pattern event. Taking $\varepsilon$ a constant bounded
-below and $w=\Omega(\lambda)$ gives $\Pr[\sigmin<c\,t_0]\le 2^{-\lambda}$. This matches the
-experiment, where $\sigmin$ rises with both $w$ and $\varepsilon$ and collapses to $\approx0$
-as $\varepsilon\to0$ (the near-square regime), and where Gaussian coefficients --- whose
-anti-concentration in Step~2 is the clean Gaussian small ball --- outperform binary ones
-(which would instead need a Carbery--Wright / Berry--Esseen anti-concentration input).
+\paragraph{Proof sketch (full proof in Appendix~\ref{app:proof}).}
+Write $\sigmin(M)=\min_{u\in S^{n-1}}\norm{M^\top u}_2$, $M^\top u=\sum_i u_i r_i$. The band
+structure makes the $m$ coordinates of $M^\top u$ \emph{independent} Gaussians of total
+variance $w$ (distinct columns use disjoint entries: $(M^\top u)_j\sim\mathcal N(0,s_j^2(u))$,
+$s_j^2(u)=\sum_{i:\,j\in[a_i,a_i+w)}u_i^2$, $\sum_j s_j^2=w$). Tensorizing the per-coordinate
+Gaussian anti-concentration gives a single-direction small ball $(C\rho)^{\kappa(u)}$, with
+$\kappa(u)=\#\{j:s_j^2(u)>0\}$ the number of \emph{active columns} the direction touches. One
+then splits $S^{n-1}$: \emph{incompressible} directions spread over $\kappa=\Theta(\varepsilon
+n)$ columns (beating the $e^{O(n)}$ spherical net), \emph{compressible} ($\approx k$-sparse)
+ones still touch $\kappa=\Omega(w)$ columns (beating the small $k$-sparse net once
+$w=\Omega(\log n)$); random starts make the pattern well-spread except with probability
+$e^{-\Omega(w)}$ (balls-into-bins). Together these give the $\min(\varepsilon n,w)$ exponent.
+Thus $\varepsilon$ sets the conditioning scale (spectral gap) and the incompressible exponent,
+$w$ the compressible exponent --- matching the experiment, where $\sigmin$ rises with both and
+collapses as $\varepsilon\to0$. Gaussian coefficients make the tensorized step the clean
+Gaussian small ball; binary would need a Carbery--Wright / Berry--Esseen replacement.
 
 \section{Open problems / next steps}
 
-\begin{problem}[$\sigmin$ tail bound --- make the sketch rigorous]
-Turn Section~\ref{sec:sigmin} into a theorem: pin the constants $c,c'$ and threshold
-$t_0(\varepsilon)$ in $\Pr[\sigmin(M)<c\,t_0]\le e^{-c'\min(n,w)}$ for random width-$w$
-\emph{Gaussian} band matrices with $m=(1+\varepsilon)n$, giving an explicit
-$(\varepsilon,w)\mapsto t$ trade-off matching the measured surface. The compressible-net
-balancing (Step~3) and the good-pattern event (Step~4) are the parts needing care.
+\begin{problem}[sharpen the $\sigmin$ threshold]
+Theorem~\ref{thm:sigmin} (proof in Appendix~\ref{app:proof}) gives the qualitative tail
+$\Pr[\sigmin<c_2]\le e^{-c_3\min(\varepsilon n,w)}$. What remains is the \emph{tight} threshold
+$t(\varepsilon,w)$ --- an explicit $(\varepsilon,w)\mapsto t$ matching the measured surface
+(and hence the smallest $w$ for a target $\sigmin$). The compressible-net balancing
+(Appendix Step~B.3) and the optimal constant in the spectral gap are the parts needing care.
 \end{problem}
 
 \begin{problem}[empirical conditioning]
@@ -337,5 +373,84 @@ decode and resolving the open remark of \S4.3 of the base paper. The packing (of
 alignment of paired layers; replication vs.\ windowed layout) and its
 communication/computation trade-off remain to be fixed.
 \end{problem}
+
+\appendix
+\section{Full proof of Theorem~\ref{thm:sigmin}}\label{app:proof}
+
+Throughout, $c,C,c_i,C_i$ denote positive constants depending only on $\varepsilon_0$, and we
+condition on the starts $\{a_i\}$ until Step~B.4. Recall $\sigmin(M)=\min_{u\in S^{n-1}}\norm{M^\top u}_2$ and $M^\top u=\sum_i u_i r_i$.
+
+\paragraph{B.1 Independent-coordinate representation.}
+For $u\in S^{n-1}$ the coordinates of $M^\top u$ are
+$(M^\top u)_j=\sum_{i:\,j\in[a_i,a_i+w)}u_i M_{ij}$. Entries $\{M_{ij}\}$ with distinct $j$ are
+disjoint sets of i.i.d.\ $\mathcal N(0,1)$ variables, so $\{(M^\top u)_j\}_{j\in[m]}$ are
+independent with $(M^\top u)_j\sim\mathcal N(0,s_j^2(u))$,
+$s_j^2(u)=\sum_{i:\,j\in[a_i,a_i+w)}u_i^2$, and $\sum_{j}s_j^2(u)=w\norm u_2^2=w$. Let
+$\kappa(u)=\#\{j:s_j^2(u)>0\}=\big|\bigcup_{i\in\mathrm{supp}(u)}[a_i,a_i+w)\big|$ be the
+number of active columns.
+
+\begin{lemma}[tensorized small ball; Rudelson--Vershynin]\label{lem:tensor}
+There are constants $C_0,p_0<1$ such that for every fixed $u$ and every $\rho\le 1$,
+\[
+  \Pr\big[\norm{M^\top u}_2 \le \rho\sqrt w\big]\;\le\;(C_0\rho)^{\,\kappa(u)/2}.
+\]
+\end{lemma}
+\begin{proof}[Proof]
+Each Gaussian coordinate satisfies $\Pr[|(M^\top u)_j|\le \rho\, s_j(u)]\le \sqrt{2/\pi}\,\rho$.
+Restricting to the $\kappa(u)$ active coordinates and applying the tensorization lemma of
+Rudelson--Vershynin (independent coordinates, uniform single-coordinate small ball) gives
+$\Pr[\sum_{j}(M^\top u)_j^2\le \rho^2\sum_j s_j^2(u)]\le (C_0\rho)^{\kappa(u)/2}$; substitute
+$\sum_j s_j^2(u)=w$.
+\end{proof}
+
+\paragraph{B.2 Good sparsity pattern.}
+Call the pattern $\{a_i\}$ \emph{good} if (a) every column lies in $O(w/(1+\varepsilon))$ bands
+and (b) every $k\le n$ rows have band-union of size $\ge \tfrac12\min(kw,\,c\varepsilon n)$.
+Since $a_i\sim U[0,m-w]$ i.i.d.\ with $m=(1+\varepsilon)n$, (a) is a balls-into-bins bound and
+(b) follows because $k$ width-$w$ windows placed uniformly in $[0,m]$ cover
+$\Omega(\min(kw,m))$ points in expectation with Chernoff concentration; both fail with
+probability $\le e^{-c_4 w}$. Assume the pattern is good (charged to the final budget).
+
+\paragraph{B.3 Net argument on incompressible and compressible vectors.}
+Fix $\delta,\theta\in(0,1)$ constants (chosen below) and split $S^{n-1}$ into
+$\mathrm{Comp}(\delta n,\theta)$ (vectors within Euclidean distance $\theta$ of some
+$\delta n$-sparse unit vector) and its complement $\mathrm{Incomp}$.
+
+\emph{Incompressible.} By the Rudelson--Vershynin structure lemma, every
+$u\in\mathrm{Incomp}$ has $\ge c_5 n$ coordinates with $|u_i|\ge c_6/\sqrt n$; these spread
+over, by goodness~(b), $\kappa(u)\ge \tfrac12\min(c_5 n\cdot w,\,c\varepsilon n)=\Omega(\varepsilon n)$
+active columns. Lemma~\ref{lem:tensor} gives, for each fixed $u$,
+$\Pr[\norm{M^\top u}\le\rho\sqrt w]\le (C_0\rho)^{\Omega(\varepsilon n)}$. Take a
+$\tfrac{\rho}{2\sigma_{\max}}$-net $\mathcal N$ of $\mathrm{Incomp}$ with
+$|\mathcal N|\le (C/\rho)^{\,n}$ (here $\sigma_{\max}(M)\le C_7(\sqrt w+\sqrt m)$ w.h.p.\ by
+the Bai--Yin/$\sigma_{\max}$ bound, charged to the budget; $\norm{M^\top\cdot}$ is
+$\sigma_{\max}$-Lipschitz). Choosing $\rho=\rho_0$ a small constant makes
+$(C_0\rho_0)^{\Omega(\varepsilon n)}|\mathcal N|\le e^{-c_8\varepsilon n}$, and the Lipschitz
+net-to-sphere transfer yields $\min_{u\in\mathrm{Incomp}}\norm{M^\top u}\ge \tfrac12\rho_0\sqrt w$
+except with probability $e^{-c_8\varepsilon n}$.
+
+\emph{Compressible.} It suffices (by the distance characterization of $\sigmin$) to bound
+$\min_{u\in\mathrm{Sparse}(\delta n)}\norm{M^\top u}$. A $\delta n$-sparse direction activates,
+by goodness~(b), $\kappa(u)\ge \tfrac12\min(\delta n\, w, c\varepsilon n)=\Omega(w)$ columns
+(for $\delta$ small enough that $\delta n w\le c\varepsilon n$, i.e.\ $\delta\le c\varepsilon/w$,
+giving $\kappa=\Omega(\delta n w)$; we instead take $k=\Theta(\varepsilon n/w)$ so
+$\kappa=\Omega(\varepsilon n)$ when that is $\le w$ and $\Omega(w)$ otherwise). A
+$\rho$-net of $\mathrm{Sparse}(k)\cap S^{n-1}$ has $\binom{n}{k}(C/\rho)^k\le
+e^{O(k\log(n/k))}$ points. With $\kappa=\Omega(w)$ active columns per point,
+Lemma~\ref{lem:tensor} gives per-point probability $(C_0\rho)^{\Omega(w)}$; the union is
+$\le e^{O(k\log(n/k))-\Omega(w)}\le e^{-\Omega(w)}$ once $w\ge c_1\log n$ and $k\log(n/k)\le
+\tfrac12\cdot\Omega(w)$, which holds for $k=O(w/\log n)$. Hence
+$\min_{u\in\mathrm{Comp}}\norm{M^\top u}\ge c_9\sqrt w$ except with probability $e^{-c_{10}w}$.
+
+\paragraph{B.4 Assembly.}
+On the good-pattern event (probability $1-e^{-c_4 w}$) and the two net events
+(probabilities $1-e^{-c_8\varepsilon n}$, $1-e^{-c_{10}w}$), every $u\in S^{n-1}$ has
+$\norm{M^\top u}\ge c_{11}\sqrt w$, i.e.\ $\sigmin(M)\ge c_{11}\sqrt w\ge c_2$. A union bound
+over the three failure events gives $\Pr[\sigmin(M)<c_2]\le e^{-c_3\min(\varepsilon n,w)}$,
+proving Theorem~\ref{thm:sigmin}. The threshold can be taken $t(\varepsilon,w)=c_{11}\sqrt w$
+up to the $\varepsilon$-dependence absorbed in the incompressible scale; pinning the sharp
+$t(\varepsilon,w)$ (in particular the $\varepsilon\to0$ collapse, where the incompressible
+exponent $\varepsilon n$ and the spectral gap both vanish) is the content of Open
+Problem~1. \qed
 
 \end{document}

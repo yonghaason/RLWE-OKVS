@@ -160,3 +160,92 @@ These numbers back the design-note claim that the real-field payload OKVS reduce
   These experiments give the empirical `(ε, w) ↦ σ_min` surface that bound must match.
 - Garbage is measured for fresh random query bands; in the protocol the non-key queries are
   OPRF'd items, same distribution, so the estimates transfer.
+
+---
+
+# Encoding failure vs band width (Appendix-F methodology)
+
+[`failprob.cpp`](failprob.cpp) measures the **encoding-failure probability** of the
+real-field OKVS as a function of band width `w`, following Appendix F of the paper. For
+full-entropy (Gaussian / large-field) coefficients the encoding fails iff the band matrix is
+rank-deficient, which generically happens iff the sparsity pattern admits **no perfect
+row-to-column matching**; for equal-width bands this is an interval-matching feasibility test,
+decided exactly by the leftmost-free greedy (the same rule the encoder's triangulation uses),
+computed in `O(n α)` via a versioned union-find. We fit `λ = −log₂ Pr[fail] = a·w + g` and
+extrapolate to `λ = 40` (`ε = 1`, n averaged over up to 40k random patterns).
+
+![failprob](figures/fig_failprob.png)
+
+**The relation is linear in `w` in the real field too** (R² ≈ 0.97–0.998), and — as the
+paper's eq. (4) posits — the slope `a` is essentially **n-independent**. The robust
+shared-slope fit gives `a ≈ 1.68` and:
+
+| n | intercept g | **w at 2⁻⁴⁰** |
+|---|---|---|
+| 2¹⁶ | −13.4 | 32 |
+| 2¹⁸ | −15.1 | 33 |
+| 2²⁰ | −17.0 | **34** |
+| 2²² | −19.2 | 35 |
+
+Two takeaways:
+
+- **n = 2²⁰ gives `w = 34`, matching the paper's full-field `Z_p`-band value (Table 6, ε=1.0)
+  exactly.** Since Gaussian rank-failure = structural-matching-failure = large-field
+  rank-failure, the real-field payload OKVS **inherits the paper's full-field band widths** —
+  one can reuse the paper's `(ε, w)` table for the CKKS payload OKVS.
+- The slope `a ≈ 1.68` is close to the paper's `Z_p` slope `1.73` (ε=1); the small gap is
+  measurement noise (our trial counts are modest, especially the few high-`w`/low-fail points
+  at n = 2²², whose per-n fit is the noisy outlier — the shared-slope fit corrects for it).
+
+This also corroborates Theorem 1's prediction that `log Pr[ill-conditioned] ≈ −c·w` is linear
+in `w` (binding term `min(εn, w) = w` here): the operative `w` for a `2⁻⁴⁰` target is
+`Ω(λ)`, set empirically at ≈ 32–35 for these sizes.
+
+---
+
+# CKKS rotation-key decode (first implementation)
+
+[`ckks_decode.cpp`](ckks_decode.cpp) (SEAL 4.1 + HEXL) realizes the encode → CKKS encrypt →
+homomorphic band decode → decrypt round-trip **using homomorphic rotations (Galois keys), not
+pre-rotated ciphertexts**, at scale `2⁴⁰`. First-cut scope: single block (`m = N` slots),
+single diagonalized layer (`n` queries at distinct diagonal positions), Gaussian width-`w`
+bands, min-norm encoding. The decode is
+
+```
+c* = Σ_{j=0}^{w-1}  rotate(c_p, j)  ⊙  diag_j        (w−1 Galois rotations + w plain-mults)
+```
+
+Representative run (`ring = 2¹⁴`, `N = 8192` slots, `n = 4000`, `ε ≈ 1.05`, `w = 24`,
+scale `2⁴⁰`, coeff-mod `{60,40,40,60}`):
+
+| quantity | value |
+|---|---|
+| `‖p*‖ / ‖v‖` (min-norm encode) | **0.306** (matches the Gauss conditioning study) |
+| `‖p*‖_∞` | 0.97 |
+| decode `max‖v′ − v‖` | `1.2 × 10⁻⁵` |
+| decode `rms‖v′ − v‖` | `1.4 × 10⁻⁶` |
+| **precision preserved** | **≈ 19 bits** |
+
+The rotation-key decode is **correct** (`v′ ≈ v` at every matching slot) and preserves ~19
+bits at scale `2⁴⁰` — consistent with CKKS's effective precision after a plaintext multiply
+(the per-slot error `η` is ~`2⁻¹⁹`, larger than the naïve `‖p‖_∞·2⁻⁴⁰`; Corollary 1's
+`|v′−v| ≤ √w·η` then gives the observed magnitude). For deeper payload precision, raise the
+scale / modulus.
+
+**Deferred (next steps), as planned:**
+- collisions among query starts → sequencing into layers;
+- `m > N` → N-spacing across multiple blocks (true RSB), reusing each rotation across layers;
+- **garbage removal** (indicator OKVS + ssPMT share + the single ctxt×ctxt mask) — the
+  decode here delivers `⟨row(y),p⟩` for *every* slot, payload on matches and garbage on
+  non-matches; masking off the garbage is the next implementation milestone.
+
+Build:
+```
+SEAL=../../thirdparty/SEAL
+g++ -O2 -std=c++17 -I$SEAL/native/src -I$SEAL/build/native/src \
+  -I$SEAL/build/thirdparty/msgsl-src/include -I$SEAL/build/thirdparty/hexl-build/hexl/include \
+  ckks_decode.cpp -o ckks_decode \
+  $SEAL/build/lib/libseal-4.1.a $SEAL/build/thirdparty/hexl-build/hexl/lib/libhexl.a \
+  $SEAL/build/lib/libz.a $SEAL/build/lib/libzstd.a \
+  $SEAL/build/thirdparty/hexl-build/cmake/third-party/cpu-features/cpu-features-build/lib/libcpu_features.a -lpthread
+```
