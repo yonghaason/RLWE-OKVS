@@ -12,6 +12,7 @@
 namespace rlweOkvsTests {
     oc::TestCollection Tests([](oc::TestCollection& t) {
     t.add("OKVS_width_test                  ", width_test),
+    t.add("RPMT_protocol_test               ", rpmt_protocol_test);
     // t.add("OKVS_encode_test                 ", encode_test),
     // t.add("OKVS_decode_test                 ", decode_test),
     // t.add("OPRF_protocol_test               ", oprf_protocol_test);
