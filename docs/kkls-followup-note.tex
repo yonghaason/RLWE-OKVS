@@ -1,0 +1,814 @@
+% ===========================================================================
+% KKLS follow-up note. Two topics (see docs/kkls-followup-brief.md):
+%   (A) the dense two-row BGV decode using the full 2x(N/2) slot hypercube,
+%   (B) the leakage of disclosing the receiver's decode layout in ssPMT.
+%
+% Provenance of the recovered material (both sources live in the companion
+% yonghaason/Real-PJC repository, not in this one):
+%   - Section 3 prose and Algorithm 2 are adapted from Real-PJC's
+%     docs/encrypted-alignment-design.tex ("Pre-rotation vs. homomorphic
+%     rotation", "The BGV dense two-row decode", "Output-swap refinement",
+%     Open problem "2-row decode --- resolved").
+%   - The recovered paper text (former realpjc.tex Sec. 3.1 "Variant with
+%     Receiver-side Rotation" + "Optimality of the rotation count" + the
+%     "Redundancy Sweep" appendix) was deleted by Real-PJC commit 043677f
+%     ("Demote the HE decode section to Preliminaries; defer 2x(N/2)
+%     material"); recovered via `git show 043677f^:docs/realpjc.tex` in that
+%     repository. (The handoff brief cites the stale hash 2d828a1 for it.)
+%
+% Scope boundary: sigma_min tail bounds, real-field OKVS, and min-norm
+% encoding belong to the Real-PJC paper, NOT to this note. The layout-leakage
+% discussion overlaps with Real-PJC's "layout matching" argument; keep the
+% conclusions consistent (there the OPRF direction prevents the sender from
+% predicting coordinates; here, in standalone KKLS ssPMT, the sender knows
+% F(x) and can predict them --- which is exactly what this note analyzes).
+% ===========================================================================
+\documentclass[runningheads]{llncs}
+%
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{algorithm}
+\usepackage[noEnd=true]{algpseudocodex}
+\algrenewcommand\algorithmicrequire{\textbf{Input:}}
+\algrenewcommand\algorithmicensure{\textbf{Output:}}
+\newcommand{\LineComment}[1]{\State \rule{0pt}{3ex}\textit{//~#1}}
+\newcommand{\sample}{\stackrel{\$}{\gets}}
+\usepackage{xcolor}
+
+% ---------------------------------------------------------------------------
+%  Drafting: \TODO{...} renders as a red [TODO: ...].
+% ---------------------------------------------------------------------------
+\newcommand{\TODO}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\VERIFY}[1]{\textcolor{orange}{[VERIFY: #1]}}
+
+% ---------------------------------------------------------------------------
+%  Functionality box (as in realpjc.tex)
+% ---------------------------------------------------------------------------
+\newsavebox{\funcboxsave}
+\newenvironment{funcbox}
+  {\begin{lrbox}{\funcboxsave}\begin{minipage}{0.93\linewidth}\smallskip}
+  {\smallskip\end{minipage}\end{lrbox}\begin{center}\fbox{\usebox{\funcboxsave}}\end{center}}
+
+% ---------------------------------------------------------------------------
+%  Frequently-used macros (shared with realpjc.tex)
+% ---------------------------------------------------------------------------
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Zp}{\mathbb{Z}_p}
+\newcommand{\Enc}{\mathsf{Enc}}
+\newcommand{\Dec}{\mathsf{Dec}}
+\newcommand{\PMult}{\mathsf{PMult}}          % plaintext multiply (ctxt x plaintext)
+\newcommand{\CAdd}{\mathsf{Add}}             % ciphertext add
+\newcommand{\rr}{\rho}                       % row-rotation by r
+\newcommand{\colswap}{\sigma}                % BGV column swap (swaps the two rows)
+\newcommand{\Okvs}{\mathsf{OKVS}}
+\newcommand{\HomDec}{\mathsf{HomDecode}}
+\newcommand{\Snd}{\mathsf{S}}                % sender
+\newcommand{\Rcv}{\mathsf{R}}                % receiver
+\newcommand{\row}{\mathsf{row}}
+\newcommand{\band}{w}                        % band width
+\newcommand{\eps}{\varepsilon}               % OKVS expansion (m = (1+eps) n)
+\newcommand{\half}{H}                        % H = N/2, slots per block / row length
+\newcommand{\Fsspmt}{\mathcal{F}_{\mathsf{ssPMT}}}
+\providecommand{\norm}[1]{\lVert #1 \rVert}
+% Topic B macros
+\newcommand{\Poi}{\mathrm{Poi}}
+\newcommand{\Bin}{\mathrm{Bin}}
+\newcommand{\TV}{\mathrm{TV}}
+\newcommand{\LR}{\mathsf{LR}}
+\newcommand{\occ}{\mathsf{occ}}
+%
+\begin{document}
+%
+\title{Notes on Batch Homomorphic OKVS Decoding:\\ the Dense Two-Row BGV Layout, and\\ the Cost of Layout Disclosure in ssPMT}
+%\titlerunning{Dense two-row decoding and layout disclosure}
+\author{\TODO{author list (follow-up to~\cite{EPRINT:KwaKwoLeeSon26})}}
+\institute{\TODO{institutes}}
+%
+\maketitle
+%
+\begin{abstract}
+\TODO{150--250 words. Two self-contained additions to the batch homomorphic OKVS
+decoding framework of KKLS~\cite{EPRINT:KwaKwoLeeSon26}. (i)~A \emph{dense two-row}
+BGV decode that uses the full $2\times(N/2)$ slot hypercube: two OKVS blocks per input
+ciphertext, two sequenced query layers per output ciphertext, and a column-swap routing
+that needs no per-output merge. With the output-swap rotation schedule the receiver
+performs only $L/2+(\band{-}1)/2$ rotations under two Galois keys, and communication
+becomes monotone in the OKVS expansion $\eps$ --- unlocking the small-$\eps$ regime
+($-38\%$ communication at $\eps=0.2$ vs.\ the pre-rotated layout's U-shaped optimum).
+(ii)~A leakage analysis of a natural ssPMT optimization: disclosing the receiver's
+occupied decode positions to compress the secret-shared equality phase from $L\half$ to
+$n_y$ instances. We show the disclosure is \emph{not} innocuous: the sender can predict
+each candidate's slot column, the column multiplicity is a likelihood-ratio test with
+per-candidate advantage $\approx1/\sqrt{2\pi\lambda}$ at fill rate $\lambda=n_y/\half$,
+and --- qualitatively worse --- an empty column is a \emph{certain non-membership
+certificate}, so sparse layouts leak catastrophically. Publishing the layout jointly
+with a second predictable coordinate system (e.g.\ a cuckoo-bin correspondence) upgrades
+the attack to an essentially perfect per-item membership test. We give the repairs:
+evaluate over the full deterministic layout (constant-factor cost $1/\text{fill-rate}$,
+trivial simulation), or state the leakage function explicitly and forbid sparse
+parameters.}
+
+\keywords{Oblivious key-value stores \and Homomorphic encryption \and Private
+membership test \and Leakage analysis.}
+\end{abstract}
+%
+% ===========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+\TODO{Frame as a follow-up note to KKLS~\cite{EPRINT:KwaKwoLeeSon26}: the base RPMT
+paper introduced batch homomorphic OKVS decoding (spaced bands, sequencing) and the
+ssPMT of its Appendix~D. This note settles two questions the base paper left on the
+table: (A)~can the BGV decode use the \emph{full} $2\times(N/2)$ slot space without
+per-output merges or replicated inputs, and at what rotation cost; (B)~is the
+``publish the receiver's decode layout'' optimization of the standalone ssPMT safe.}
+
+\subsection{Our Contribution}
+\label{sec:intro:contrib}
+
+\TODO{Contribution list, current plan:
+\begin{enumerate}
+  \item The dense two-row BGV decode (Section~\ref{sec:dense}): construction,
+  correctness (row-wise, no merge), and the rotation-schedule space with an
+  optimality discussion --- input-swap $m/N+(\band{-}1)$ vs.\ output-swap
+  $L/2+(\band{-}1)/2$, and why replicated-$p$ and per-output-merge layouts are
+  dominated.
+  \item Integrated sequencing (Section~\ref{sec:dense:intseq}): fill both rows of a
+  paired layer under one shared block window, projected $\PMult$ count
+  $0.97$--$1.04\times$ the $N$-slot decode (vs.\ $1.18$--$1.41\times$ for the current
+  sequence-then-pair implementation). Design, implementation, re-measurement.
+  \item The layout-disclosure leakage analysis (Section~\ref{sec:leak}): leakage
+  function, likelihood-ratio optimality (Neyman--Pearson), the
+  $\TV=$ mode-mass identity with $\lambda$-scaling, the empty-column certificate, and
+  the consistency-oracle amplification.
+  \item Repairs with proofs (Section~\ref{sec:leak:repair}): full-layout /
+  dummy-fill evaluation with a trivial simulator, or leakage-explicit compression
+  with a $\lambda$ lower bound.
+  \item Benchmarks: the recovered redundancy sweep (Appendix~\ref{app:epssweep}),
+  extended by integrated sequencing and the ss-equality cost gap ($n_y$ vs.\
+  $L\half$ instances).
+\end{enumerate}}
+
+\subsection{Related Work}
+\label{sec:intro:related}
+\TODO{KKLS~\cite{EPRINT:KwaKwoLeeSon26}; circuit-PSI ssPMT
+instantiations~\cite{EC:PSTY19,AC:LPRST21}; BGV/BFV slot hypercube and rotation
+machinery (Gentry--Halevi--Smart / HElib literature); membership-inference-style
+leakage analyses in PSI-adjacent protocols. The companion Real-PJC paper uses the
+same decode engine for CKKS alignment; its ``layout matching'' step is safe for a
+different reason (the sender cannot evaluate the OPRF), which this note's analysis
+makes precise.}
+
+% ===========================================================================
+\section{Background: the KKLS Decode and ssPMT}
+\label{sec:prelim}
+
+\subsection{Notation}
+\label{sec:prelim:notation}
+\TODO{Standard notation ($\kappa$, $\lambda_s$ statistical parameter, $[n]$, vectors,
+etc.). BGV with ring dimension $N$: $N$ plaintext slots forming the hypercube
+$\Z_{\half}\times\Z_2$ with $\half=N/2$ (Section~\ref{sec:dense:geometry});
+$\rr_r$ is the $r$-slot row rotation (both rows rotate in parallel), $\colswap$
+the column swap (the two rows exchange). OKVS with $n$ rows, $m=(1+\eps)n$
+columns, band width $\band$.}
+
+\subsection{Batch Homomorphic OKVS Decoding}
+\label{sec:prelim:homdec}
+
+We recall the batch decode of KKLS~\cite{EPRINT:KwaKwoLeeSon26}; this summary is what
+Sections~\ref{sec:dense} and~\ref{sec:leak} build on.
+
+\paragraph{Spacing the band.}
+KKLS fix a \emph{spacing} column permutation $\pi_\half$ on top of the random-band OKVS:
+regroup the $m$ coordinates into $b=m/\half$ blocks of $\half$, and place the $\band$
+in-band coordinates of each row into $\band$ \emph{consecutive blocks, one coordinate
+per block, at a common intra-block slot}. We call this variant the random
+\emph{spaced}-band (RSB) OKVS. The permutation is fixed and public, so encoding is
+unchanged up to reindexing; its purpose is purely to align the decode with the slot
+structure of batched HE.
+
+\paragraph{The decode.}
+The batch decode evaluates many OKVS decodings \emph{under encryption}: one party holds
+ciphertexts of the OKVS vector $p$, block-packed as ciphertexts of $\half$ slots, and
+the other holds a batch of queries $\{y_j\}$ and wants output ciphertexts whose slots
+contain $\langle\row(y_j),p\rangle$. Since decoding is linear, the batch is one plain
+matrix--ciphertext vector product, where the plain matrix is determined by the
+underlying OKVS rows; and since the decoder controls where each query's result lands,
+the matrix can be organized \emph{diagonally}. For a generic matrix this diagonal
+method costs one rotation per diagonal; the RSB spacing is what removes them. After
+$\pi_\half$, the $\band$ nonzeros of every row sit one per consecutive block \emph{at
+the same intra-block slot}, so each block contributes through a slot-aligned $\PMult$
+and the contributions add without any slot movement: the whole product needs only
+$\PMult/\CAdd$, up to the wrap bookkeeping at block boundaries which Section~\ref{sec:dense}
+is about.
+
+\paragraph{Sequencing.}
+Distinct queries can be assigned the same output slot (their bands start in the same
+block window at the same intra-block position). KKLS resolve these collisions by
+\emph{sequencing}: greedily partition the $n_y$ queries into $L$ layers, assigning
+query $j$ a pair $(\mu_j,\tau_j)$ --- layer and slot --- such that within each layer all
+occupied slots are distinct and each layer's band starts span at most $\zeta$ blocks,
+so a layer touches only $\sim\band+\zeta$ diagonals rather than all $b$. Each layer
+becomes one output ciphertext. Two facts matter later:
+\begin{enumerate}
+  \item The assignment $(\mu_j,\tau_j)$ depends only on $H_1(F(y_j))$ (the band
+  start of the key digest $F(y_j)$), the slot count, and $\zeta$. In particular the
+  slot coordinate $\tau_j$ is a \emph{deterministic public function}
+  $\tau(F(y_j))$ of the digest alone, while the layer $\mu_j$ additionally depends
+  on which other queries collide.
+  \item In the well-filled regime $\half\ll n_y$ a balls-into-bins argument gives
+  $L\approx n_y/\half$ layers, i.e.\ the layout's \emph{fill rate}
+  $n_y/(L\half)$ is close to $1$ and each slot column carries on average
+  $\lambda:=n_y/\half\approx L$ queries.
+\end{enumerate}
+
+\subsection{The KKLS ssPMT}
+\label{sec:prelim:sspmt}
+
+The secret-shared private membership test is the two-party functionality of
+Figure~\ref{fig:sspmt}: it tells the parties, in XOR-shared form, which of the
+receiver's identifiers the sender also holds, while neither party learns the
+membership bits themselves.
+
+\begin{figure}[t]
+\begin{funcbox}
+\begin{center}
+  \textbf{Functionality $\Fsspmt$}
+\end{center}
+\textbf{Parameters:} set sizes $n_x$, $n_y$.
+\begin{itemize}
+  \item[] \textbf{Inputs:} $\Snd$ inputs a set $X=\{x_i\}_{i\in[n_x]}$; $\Rcv$ inputs an
+  ordered tuple $Y=(y_1,\dots,y_{n_y})$.
+  \item[] \textbf{Output:} for each $j\in[n_y]$, sample bits
+  $b_{\Snd,j},b_{\Rcv,j}\gets\{0,1\}$ uniformly subject to
+  $b_{\Snd,j}\oplus b_{\Rcv,j}=\mathbf 1(y_j\in X)$. Give $(b_{\Snd,j})_{j\in[n_y]}$ to
+  $\Snd$ and $(b_{\Rcv,j})_{j\in[n_y]}$ to $\Rcv$.
+\end{itemize}
+\end{funcbox}
+\caption{The secret-shared private membership test functionality.}
+\label{fig:sspmt}
+\end{figure}
+
+The KKLS instantiation (Appendix~D of~\cite{EPRINT:KwaKwoLeeSon26}) runs the batch
+decode of Section~\ref{sec:prelim:homdec} on an \emph{indicator} OKVS: $\Snd$ encodes
+$P\gets\Okvs.\mathsf{Encode}(\{(F(x_i),I_\Snd)\}_i)$ with a \emph{constant} target
+string $I_\Snd$, and sends it encrypted; $\Rcv$ homomorphically decodes at its own
+queries in its own sequenced layout, masks each occupied slot with a fresh random
+$r_j$, and returns the result; $\Snd$ decrypts, obtaining
+$d_j+r_j$ with $d_j=\langle\row(F(y_j)),P\rangle$ ($=I_\Snd$ on a match, garbage
+otherwise); finally a secret-shared equality test between $\Snd$'s
+$d_j+r_j-I_\Snd$ and $\Rcv$'s $r_j$ yields the XOR-shared membership bit.
+
+\begin{remark}[born aligned]\label{rmk:bornaligned}
+Because the decode is \emph{encrypted}, the constant target $I_\Snd$ is permissible:
+$\Rcv$ never sees $d_j$ in the clear. (A plaintext OPPRF cannot use a constant
+target --- the receiver would observe the repeated value on every match, leaking
+membership directly.) The consequence is that the resulting shares are indexed by
+$\Rcv$'s decode layout $(\mu_j,\tau_j)$ \emph{from birth}: no re-alignment step is
+needed downstream. This property is what makes the layout itself a first-class
+protocol object --- and what makes its disclosure (Section~\ref{sec:leak}) tempting.
+\end{remark}
+
+% ===========================================================================
+\section{The Dense Two-Row BGV Decode}
+\label{sec:dense}
+
+\subsection{Slot Geometry: Why BGV Is Not Flat}
+\label{sec:dense:geometry}
+
+The spaced-band decode needs the $r$-slot cyclic shifts $\rr_r(c)$ of each block
+ciphertext, for the $\sim\band{-}1$ wrap offsets at block boundaries. Two ways to get
+them: \emph{(i)~pre-rotation} --- $\Snd$ sends the shifted copies in the clear and the
+receiver does only $\PMult$s (more communication, no key switching); \emph{(ii)~homomorphic
+rotation} --- the receiver builds $\rr_r$ itself from Galois keys, so $\Snd$ ships only
+the base blocks plus the keys. In CKKS option~(ii) needs just a \emph{single} $1$-slot
+key: its $N/2$ slots form one cyclic group $\Z_{N/2}$, so $\rr_r=\rr_1^{\,r}$ acts
+cyclically on all of them. The BGV/BFV subtlety is that the $N$ slots do \emph{not}
+form $\Z_N$: the slot group is $\Z_{N/2}\times\Z_2$ (an $N/2$-cyclic ``row'' direction
+and an order-$2$ ``column'' swap), so a flat $N$-cyclic shift is \emph{not} an
+automorphism and a single $1$-slot key is confined to one $N/2$ row. A naive $1$-key
+approach therefore either uses only $N/2$ of the $N$ slots (one block per ciphertext:
+this doubles $b$ and the layer depth, and is a strict loss --- $2.9$\,s / $95$\,MB at
+the benchmark point of Section~\ref{sec:dense:eval}) or must handle the two rows
+explicitly. This section shows the explicit handling costs almost nothing.
+
+\subsection{The Construction}
+\label{sec:dense:construction}
+
+Write $\half:=N/2$. Pack \emph{two} $\half$-blocks per input ciphertext,
+\[
+  C_t=\Enc(p_{2t}\Vert p_{2t+1}),\qquad t<\lceil b/2\rceil,\quad b=m/\half,
+\]
+where $u\Vert v$ places $u$ in row $0$ and $v$ in row $1$. Each \emph{output}
+ciphertext carries \emph{two} sequenced layers --- layer $2j$ in row $0$, layer
+$2j{+}1$ in row $1$ --- so both rows hold a full inner product and the receiver returns
+only $L/2$ ciphertexts. The obstruction is that a layer's width-$\band$ band spans
+consecutive blocks of \emph{both} parities: even blocks sit in row $0$ of the paired
+input, odd blocks in row $1$. To route an odd block into a row-$0$ (layer-$2j$) output
+--- or an even block into a row-$1$ output --- one multiplies by the column-swapped
+input $\colswap(C_t)=\Enc(p_{2t+1}\Vert p_{2t})$. Crucially $\colswap(C_t)$ is a
+function of the \emph{input}: it is computed \emph{once per input ciphertext} and
+reused across all output layers ($m/N$ swaps total), rather than a per-output
+row-merge (which would cost one column rotation per layer, $L$ of them --- always the
+wrong side to rotate, cf.\ Section~\ref{sec:dense:geometry}). Interleaving the two
+layers' diagonals by row,
+\[
+  D^{\mathrm{dir}}=\big(\mathrm{diag}_{2j,2t}\,\Vert\,\mathrm{diag}_{2j+1,2t+1}\big),
+  \qquad
+  D^{\mathrm{swp}}=\big(\mathrm{diag}_{2j,2t+1}\,\Vert\,\mathrm{diag}_{2j+1,2t}\big),
+\]
+then lands every contribution in its correct output row
+(Algorithm~\ref{alg:homdecode-bgv}), with row $0$ giving layer $2j$'s result and row
+$1$ layer $2j{+}1$'s --- no merge. The wrap shifts $\rr_r$ act on both rows at once,
+so a single shift serves both layers; only the $\sim\band{-}1$ wrapping blocks need
+them, on both $C_t$ and $\colswap(C_t)$, giving $\sim\band{-}1$ row rotations. Total
+receiver rotations: $m/N+(\band{-}1)$, under two Galois keys (row $+1$ and column
+$\colswap$).
+
+\begin{algorithm}[t]
+\caption{$\HomDec_{\mathrm{BGV}}$ --- dense two-row decode (two layers per output ciphertext, input column-swap schedule)}
+\label{alg:homdecode-bgv}
+\begin{algorithmic}[1]
+\Require paired ciphertexts $C_t=\Enc(p_{2t}\Vert p_{2t+1})$, $t<\lceil b/2\rceil$,
+$\half=N/2$, $b=m/\half$; query keys $\{y_j\}$; Galois keys for row rotation $\rr_1$
+and column swap $\colswap$
+\State build the $\half$-spaced RSB matrix from $\{y_j\}$; sequence into layers
+(span $\le\zeta$); form diagonals $\mathrm{diag}_{\ell,g,r}\in\Zp^{\half}$
+(layer $\ell$, block $g$, wrap $r$); pair layers $2j\!\leftrightarrow\!2j{+}1$
+\For{each referenced input pair $t$} \Comment{once; reused across all output ciphertexts}
+  \State $R^0_{t,0}\gets C_t$;\quad $R^1_{t,0}\gets \colswap(C_t)$ \Comment{one column swap per input ciphertext}
+  \For{$r=1$ to $\mathrm{maxwrap}(t)$} \Comment{only the $\sim\band{-}1$ wrapping blocks}
+     \State $R^0_{t,r}\gets \rr_1(R^0_{t,r-1})$;\quad $R^1_{t,r}\gets \rr_1(R^1_{t,r-1})$ \Comment{$\rr_1$ shifts both rows/layers together}
+  \EndFor
+\EndFor
+\For{each output ciphertext $j$} \Comment{layer $2j\to$ row $0$, layer $2j{+}1\to$ row $1$}
+  \State $c^\ast_j \gets 0$
+  \For{each referenced pair $t$ and wrap $r$}
+     \State $c^\ast_j \gets c^\ast_j + \PMult\!\big(R^0_{t,r},\ \mathrm{diag}_{2j,\,2t,\,r}\Vert\mathrm{diag}_{2j{+}1,\,2t{+}1,\,r}\big)$ \Comment{even$\to$row $0$, odd$\to$row $1$}
+     \State $c^\ast_j \gets c^\ast_j + \PMult\!\big(R^1_{t,r},\ \mathrm{diag}_{2j,\,2t{+}1,\,r}\Vert\mathrm{diag}_{2j{+}1,\,2t,\,r}\big)$ \Comment{odd$\to$row $0$, even$\to$row $1$}
+  \EndFor
+\EndFor
+\State \Return $\{c^\ast_j\}$ \Comment{row $0$ of $c^\ast_j=\langle\row(y),p\rangle$ for layer $2j$; row $1$ for layer $2j{+}1$}
+\end{algorithmic}
+\end{algorithm}
+
+\begin{proposition}[correctness, row-wise]\label{prop:dense-correct}
+For every query $y$ assigned $(\mu,\tau)$ by the sequencing, slot $\tau$ of row
+$(\mu\bmod 2)$ of output ciphertext $\lfloor\mu/2\rfloor$ of
+Algorithm~\ref{alg:homdecode-bgv} decrypts to $\langle\row(y),p\rangle$. In
+particular each query's inner product is assembled entirely within one row --- no
+contribution ever needs to cross rows after the input swap --- so no per-output merge
+is required.
+\end{proposition}
+
+\begin{proof}
+\TODO{Write out. Sketch: fix layer $2j$ (row $0$; row $1$ is symmetric). Its band
+coordinate in block $g$ contributes $\mathrm{diag}_{2j,g,r}[\tau]\cdot p_g[\tau-r]$
+for the appropriate wrap $r$. If $g=2t$ is even, $p_g$ sits in row $0$ of $C_t$, and
+the term is produced by the $R^0_{t,r}$ multiply (whose row-$0$ diagonal is
+$\mathrm{diag}_{2j,2t,r}$). If $g=2t{+}1$ is odd, $p_g$ sits in row $1$ of $C_t$,
+hence in row $0$ of $\colswap(C_t)=R^1_{t,0}$, and the term is produced by the
+$R^1_{t,r}$ multiply (row-$0$ diagonal $\mathrm{diag}_{2j,2t+1,r}$). Since $\rr_1$
+rotates the two rows in parallel and $\PMult$ is slot-wise, row $0$ of the
+accumulator only ever receives layer-$2j$ terms, and every in-band block of layer
+$2j$ is covered exactly once. Also handle: wrap at the pairing boundary
+$t=\lceil b/2\rceil-1$ (odd $b$), and queries whose band wraps modulo $m$.}
+\end{proof}
+
+\subsection{Rotation Schedules and Optimality}
+\label{sec:dense:schedules}
+
+\paragraph{Output-swap schedule (the default).}
+The swap can instead be folded through the automorphism identity
+\begin{equation}\label{eq:swapfold}
+  D\odot\colswap(x)=\colswap\big(\colswap(D)\odot x\big),
+\end{equation}
+where $\odot$ is the slot-wise plaintext multiply: since $\colswap(D^{\mathrm{swp}})$
+is a \emph{free} plaintext-side row swap, every $\PMult$ runs against $\rr_r(C_t)$
+only --- $\colswap(C_t)$ is never formed, halving the wrap shifts to
+$\lceil(\band{-}1)/2\rceil$ --- the swapped-orientation terms accumulate separately,
+and the accumulator is column-swapped \emph{once per output ciphertext}:
+\[
+  c^\ast_j=\mathrm{acc}^{\mathrm{dir}}_j+\colswap\big(\mathrm{acc}^{\mathrm{swp}}_j\big).
+\]
+Total $L/2+(\band{-}1)/2$ rotations, which beats the input-swap count
+$m/N+(\band{-}1)$ whenever $L/2<m/N+(\band{-}1)/2$ --- in our whole operating range
+(e.g.\ $n=2^{20}$, $\eps=1.1$: $207$ vs.\ $299$ rotations) --- and gains $\approx1$
+bit of noise budget because the key switch lands \emph{after} the plain-multiply sum.
+The implementation provides both schedules; the output-swap one is the default.
+
+\TODO{State the output-swap variant as a displayed algorithm or as a diff against
+Algorithm~\ref{alg:homdecode-bgv} (replace lines 3--5 by $R_{t,r}=\rr_1^r(C_t)$ only;
+keep two accumulators per output, apply~\eqref{eq:swapfold} to the swapped diagonals;
+one $\colswap$ per output at the end).}
+
+\paragraph{The schedule space.}
+\TODO{Systematize the four layouts and prove the dominance claims:
+\begin{itemize}
+  \item \emph{Input column-swap}: $m/N+(\band{-}1)$ rotations
+  (Algorithm~\ref{alg:homdecode-bgv}).
+  \item \emph{Output column-swap}: $L/2+(\band{-}1)/2$ rotations; dominates
+  input-swap iff $L/2<m/N+(\band{-}1)/2$, which holds throughout the deployment
+  range since $L\approx n_y/\half$ grows slowly while $m/N$ grows linearly in
+  $\eps$. Additionally $\approx1$ bit better in noise (key switch after the sum).
+  \item \emph{Replicated $p$} (column-swap-free): ship both orientations of every
+  block, $2\times$ input communication; dominated.
+  \item \emph{Per-output merge} (one query split across the rows): $(\band{-}1)/2+L$
+  rotations; dominated by output-swap ($L$ vs.\ $L/2$ on the dominant term).
+\end{itemize}
+Give the noise-budget accounting for input- vs.\ output-swap (where each key switch
+sits relative to the $\PMult$ sums), and the two-Galois-key material cost
+($1.4$\,MB at the benchmark parameters).}
+
+\subsection{Integrated Sequencing (Open)}
+\label{sec:dense:intseq}
+
+The current implementation sequences at $\half=N/2$ slots and pairs layers afterwards
+(\emph{sequence-then-pair}). This is wasteful in $\PMult$s: the two layers of a pair
+have independent block windows, so the pair's union window --- what the output
+ciphertext actually pays for --- is up to twice $\zeta$. An \emph{integrated}
+sequencing that fills both rows of each paired layer under one shared block window
+$\le\zeta$ would cut the plain-multiply count to a projected $0.97$--$1.04\times$ the
+$N$-slot decode, versus the measured $1.18$--$1.41\times$ of sequence-then-pair.
+
+\TODO{(1)~Design: extend the greedy sequencer to assign $(\mu_j,\tau_j)$ with
+$\mu_j$ ranging over \emph{paired} layers and a single span constraint per pair;
+queries of both parities compete for the same window. Check the balls-into-bins
+analysis still gives $L\approx n_y/\half$ (now $L/2$ pairs). (2)~Implement in the
+existing BGV decode (this repository: \texttt{experiments/}, \texttt{rlwe-okvs/},
+\texttt{exec/}).
+(3)~Re-measure the sweep of Appendix~\ref{app:epssweep}; the projection
+$0.97$--$1.04\times$ is measurement-based extrapolation, not yet a measurement.}
+
+\subsection{Measured Performance}
+\label{sec:dense:eval}
+
+At $n=2^{20}$ queries with ring dimension $N=2^{13}$, the receiver-side decode
+(diagonal-plaintext encoding included in the timing) matches or beats the base RPMT
+reference of $2.0$\,s / $58$\,MB: $1.8$\,s / $53$\,MB pre-rotated, $1.8$\,s /
+$49$\,MB dense two-row with the output-swap schedule. Correctness is verified exactly
+over $\Zp$ for all queries. The full redundancy sweep (Appendix~\ref{app:epssweep})
+shows the structural difference between the layouts: pre-rotated communication is
+\emph{U-shaped} in $\eps$ (the $\band{-}1$ shifted copies grow as $\eps$ shrinks),
+bottoming out near $\eps\approx0.4$ at $43$\,MB, while dense communication
+$\approx(1+\eps)\tfrac nN$ ciphertexts is \emph{monotone} --- so only the dense
+layout can exploit the small-$\eps$ regime ($28.5$\,MB at $\eps=0.2$, $-38\%$). In
+time, output-swap crosses pre-rotation near $\eps\approx0.6$--$0.7$: below, dense is
+faster as well; above, pre-rotation stays ahead by $2$--$5\%$.
+
+\TODO{Machine spec, library/version, thread count; re-run after integrated
+sequencing lands; add the $L/2$ return-ciphertext saving to the communication
+accounting (currently reported one-directional).}
+
+% ===========================================================================
+\section{Leakage of Layout Disclosure in the Standalone ssPMT}
+\label{sec:leak}
+
+\subsection{The Optimization, and Why It Is Tempting}
+\label{sec:leak:setting}
+
+In the KKLS ssPMT (Section~\ref{sec:prelim:sspmt}), the equality phase runs one
+secret-shared equality instance per decode position. $\Rcv$'s occupied positions are
+the $n_y$ pairs $(\mu_j,\tau_j)$, but $\Snd$ does not know which of the $L\half$
+positions those are --- the layout depends on $Y$ --- so the baseline protocol runs
+the equality test at \emph{every} position of the deterministic full layout, with
+$\Rcv$ supplying dummies at the $L\half-n_y$ unoccupied ones. A natural optimization
+is therefore:
+\begin{quote}
+  \emph{$\Rcv$ discloses its occupancy set
+  $\occ(Y)=\{(\mu_j,\tau_j):j\in[n_y]\}$ (equivalently, an $L\times\half$ bitset)
+  to $\Snd$, and the parties run only $n_y$ equality instances.}
+\end{quote}
+Since the fill rate $n_y/(L\half)$ is $0.7$--$0.9$ in well-filled deployments, the
+saving looks like a harmless constant factor. This section shows the disclosure is
+\emph{not} harmless, quantifies exactly what it leaks, and repairs it.
+
+The attack surface is specific to the \emph{standalone} ssPMT, where $\Snd$ encodes
+the indicator OKVS at the digests $F(x_i)$ of its own items and therefore
+\emph{knows} $F(x)$ for every candidate $x\in X$: by
+Section~\ref{sec:prelim:homdec}, the slot column
+$\tau(F(x))$ --- determined by the band start $H_1(F(x))$, the slot count, and
+$\zeta$ --- is a public deterministic function that $\Snd$ can evaluate
+itself.\footnote{Contrast the Real-PJC alignment protocol, which discloses a related
+correspondence safely: there the digests are $\mathrm{OPRF}$ values under
+\emph{$\Rcv$'s} key, so the sender cannot evaluate any candidate's coordinates, and
+the occupancy pattern is simulatable from $n_y$ alone. The analysis below makes
+precise that this OPRF direction is load-bearing: the moment the sender can predict
+coordinates, occupancy disclosure leaks.}
+
+\subsection{The Leakage Observable}
+\label{sec:leak:observable}
+
+Under the disclosure, $\Snd$'s view includes $\occ(Y)$. For a candidate $x$, the
+relevant statistic is the \emph{column multiplicity}
+\[
+  m_\tau \;=\; \big|\{\,j\in[n_y] \;:\; \tau(F(y_j))=\tau\,\}\big|
+  \;=\; \big|\{\,\mu \;:\; (\mu,\tau)\in\occ(Y)\,\}\big|,
+  \qquad \tau=\tau(F(x)),
+\]
+i.e.\ the number of layers in which $\Snd$'s predicted column for $x$ is occupied.
+(The layer coordinates $\mu_j$ carry no additional per-candidate information in the
+idealized model below: $\Snd$ can predict $\tau(F(x))$ but not $\mu$, which depends
+on the unknown collision pattern of all of $Y$.)
+
+\paragraph{Model.}
+We analyze the idealized assignment in which each $y_j$ is routed to an independent
+uniform column, $\tau(F(y_j))\sim U[\half]$ --- the standard random-oracle model for
+$H_1\circ F$, exact up to the sequencer's tie-breaking. Write
+\[
+  \lambda:=\frac{n_y}{\half}
+\]
+for the mean column load; in the well-filled regime $\lambda\approx L$
+(Section~\ref{sec:prelim:homdec}). Then, for a fixed candidate $x$ with
+$\tau=\tau(F(x))$:
+\begin{align*}
+  \text{if } x\notin Y:&\quad m_\tau \sim \Bin(n_y,\,1/\half)\;\approx\;\Poi(\lambda),\\
+  \text{if } x\in Y:&\quad m_\tau \sim 1+\Bin(n_y-1,\,1/\half)\;\approx\;1+\Poi(\lambda),
+\end{align*}
+the member's own query contributing the deterministic $+1$. We state the results for
+the Poisson limit; the binomial corrections are $O(1/n_y)$ and do not affect any
+conclusion. \TODO{Make the approximation claim precise (Le~Cam / monotonicity of the
+tests below under the exact binomial pair).}
+
+\subsection{Optimal Distinguishing: the Likelihood-Ratio Test}
+\label{sec:leak:lr}
+
+\begin{proposition}[the LR test, and its optimality]\label{prop:lr}
+Let $P_0=\Poi(\lambda)$ (non-member) and $P_1=1+\Poi(\lambda)$ (member). The
+likelihood ratio at an observed multiplicity $m\ge0$ is
+\[
+  \LR(m)\;=\;\frac{P_1(m)}{P_0(m)}\;=\;\frac{e^{-\lambda}\lambda^{m-1}/(m-1)!}
+  {e^{-\lambda}\lambda^{m}/m!}\;=\;\frac{m}{\lambda}
+  \qquad(\text{with }\LR(0)=0),
+\]
+which is nondecreasing in $m$. Consequently, by the Neyman--Pearson lemma, every
+optimal test is a threshold test on $m$; with equal priors the Bayes-optimal decision
+is
+\[
+  \text{declare ``member''}\iff m\ge\lambda
+  \quad(\text{i.e.\ }m\ge\lceil\lambda\rceil\text{ for non-integer }\lambda),
+\]
+and its distinguishing advantage equals $\TV(P_0,P_1)$.
+\end{proposition}
+
+\begin{proof}
+The likelihood ratio is immediate from $P_1(m)=P_0(m-1)$. Monotonicity gives the
+threshold form via Neyman--Pearson; the Bayes rule accepts exactly when $\LR(m)\ge1$,
+i.e.\ $m\ge\lambda$. The advantage of the Bayes rule under equal priors is
+$\tfrac12+\tfrac12\TV(P_0,P_1)$ minus $\tfrac12$, i.e.\ $\TV(P_0,P_1)$ up to the
+factor-$\tfrac12$ convention. \TODO{Fix one advantage convention and use it
+throughout; currently ``advantage'' $=\TV$ and ``success probability''
+$=\tfrac12+\tfrac12\TV$.}
+\end{proof}
+
+The value of $\TV(P_0,P_1)$ has a clean closed form, as an instance of a general fact
+about unit shifts of unimodal lattice distributions.
+
+\begin{lemma}[$\TV$ of a unit shift $=$ mode mass]\label{lem:tvmode}
+Let $P$ be a probability distribution on $\Z$ that is unimodal with mode $m^\ast$:
+$P(m)\ge P(m-1)$ for $m\le m^\ast$ and $P(m)\le P(m-1)$ for $m>m^\ast$. Let $Q$ be
+its unit shift, $Q(m)=P(m-1)$. Then
+\[
+  \TV(P,Q)\;=\;P(m^\ast).
+\]
+\end{lemma}
+
+\begin{proof}
+By definition $2\,\TV(P,Q)=\sum_{m\in\Z}\lvert P(m)-P(m-1)\rvert$. Unimodality fixes
+the signs: the differences are nonnegative for $m\le m^\ast$ and nonpositive for
+$m>m^\ast$, so the sum telescopes,
+\[
+  \sum_{m\le m^\ast}\big(P(m)-P(m-1)\big)
+  +\sum_{m>m^\ast}\big(P(m-1)-P(m)\big)
+  \;=\;P(m^\ast)+P(m^\ast),
+\]
+whence $\TV(P,Q)=P(m^\ast)$.
+\end{proof}
+
+\begin{corollary}[per-candidate advantage]\label{cor:advantage}
+$\Poi(\lambda)$ is unimodal with mode $\lfloor\lambda\rfloor$, so
+\[
+  \TV\big(\Poi(\lambda),\,1+\Poi(\lambda)\big)
+  \;=\;\Pr\big[\Poi(\lambda)=\lfloor\lambda\rfloor\big]
+  \;=\;e^{-\lambda}\frac{\lambda^{\lfloor\lambda\rfloor}}{\lfloor\lambda\rfloor!}
+  \;\approx\;\frac{1}{\sqrt{2\pi\lambda}},
+\]
+by Stirling. The per-candidate leakage therefore decays only as
+$\lambda^{-1/2}$: at $\lambda=128$ (e.g.\ $n_y=2^{20}$, $\half=2^{13}$) the advantage
+is $\approx3.5\%$ and the optimal test's success probability is
+$\approx\tfrac12+1.8\%$ per candidate --- far from negligible in the cryptographic
+sense, for \emph{every} parameter regime.
+\end{corollary}
+
+\subsection{The Empty-Column Certificate}
+\label{sec:leak:certificate}
+
+The average-case advantage of Corollary~\ref{cor:advantage} understates the
+qualitative danger. Since $\LR(0)=0$, the event $m_{\tau(F(x))}=0$ is not merely
+evidence --- it is a \emph{certificate}: a member's own query always contributes, so
+an empty column proves $x\notin Y$ with no error. The certificate fires on a
+non-member with probability
+\[
+  \Pr\big[\Poi(\lambda)=0\big]=e^{-\lambda}.
+\]
+Two regimes:
+\begin{itemize}
+  \item \emph{Well-filled layouts} ($\lambda\approx128$): $e^{-\lambda}$ is
+  astronomically small; the leakage is the ``soft'' $\lambda^{-1/2}$ advantage only.
+  \item \emph{Sparse layouts} ($\lambda\approx1$, i.e.\ $n_y\lesssim\half$): a
+  fraction $e^{-1}\approx37\%$ of all non-member candidates receive a definite
+  exclusion certificate. $\Snd$ can scan any candidate list and \emph{certifiably}
+  rule out a third of the non-members --- a qualitatively different leakage class.
+\end{itemize}
+The leakage is thus governed by the batching parameters: the same disclosure is a
+few-percent distinguisher in one deployment and a bulk membership filter in another.
+Any leakage-explicit variant (Section~\ref{sec:leak:repair}) must carry a lower bound
+on $\lambda$ as a security parameter, not a performance knob.
+
+\subsection{Aggregate Statistics Are Not New Leakage}
+\label{sec:leak:aggregate}
+
+$\Snd$ can also aggregate: $\sum_{x\in X}m_{\tau(F(x))}$ concentrates around
+$|X\cap Y|+n_x\lambda$, yielding an estimator of the intersection cardinality. In the
+applications consuming ssPMT, the intersection cardinality is part of the intended
+output (or is revealed by the downstream functionality), so we do not count this as
+new leakage; the per-candidate tests above are the genuine damage. \TODO{Say this
+carefully: if ssPMT is used inside a functionality that hides the cardinality, the
+aggregate estimator \emph{is} new leakage and the repair of
+Section~\ref{sec:leak:repair} is mandatory regardless of $\lambda$.}
+
+\subsection{Amplification: the Consistency Oracle}
+\label{sec:leak:oracle}
+
+\VERIFY{This subsection is a session-derived analysis and has not yet been
+independently re-derived; re-check the error probability and the dummy-padding claim
+before publication.}
+
+The disclosure becomes fatal when the layout is published \emph{jointly} with a
+second coordinate system that $\Snd$ can also predict. The canonical example is a
+correspondence table
+\[
+  \sigma:\ \mathrm{bin}\longmapsto(\mu,\tau)
+\]
+between a circuit-PSI-style cuckoo layout (bins of $F(y_j)$) and the decode layout
+--- exactly the object one would publish to splice the ssPMT shares into an existing
+cuckoo-indexed protocol. Now $\Snd$ holds, for every candidate $x$, \emph{two}
+predictable coordinates: the cuckoo bin $\mathrm{bin}(F(x))$ and the slot column
+$\tau(F(x))$. It checks their \emph{consistency}: does $\sigma$ map (one of) $x$'s
+candidate bins to a position in column $\tau(F(x))$?
+\begin{itemize}
+  \item If $x\in Y$, the pair is consistent by construction --- always.
+  \item If $x\notin Y$, consistency requires some other $y_j$ to occupy one of
+  $x$'s bins \emph{and} agree with $x$'s column, which happens with probability
+  $\approx1/\half$ per bin.
+\end{itemize}
+The consistency check is therefore a per-item membership test with one-sided error
+$O(1/\half)$ --- essentially perfect at any realistic $\half$. Note the contrast with
+Section~\ref{sec:leak:lr}: pairing two coordinates converts a
+$\lambda^{-1/2}$-advantage statistical test into an exact oracle. Dummy padding does
+\emph{not} help: padding adds spurious occupied positions, but every \emph{real}
+item's pair remains consistent, so the one-sided test survives (the padding only
+perturbs the already-negligible false-positive rate \VERIFY{check the direction of
+this perturbation}).
+
+\begin{center}
+\emph{Design rule: never publish the pairing of two coordinate systems that the
+sender can evaluate on candidate inputs.}
+\end{center}
+
+\subsection{Repairs}
+\label{sec:leak:repair}
+
+\paragraph{Repair 1: do not disclose (the default).}
+Run the equality phase over the \emph{full deterministic layout}: all $L\half$
+positions, with $\Rcv$ supplying uniformly random dummy shares at unoccupied
+positions (equivalently: $\Rcv$ pads its input with dummy queries until every slot
+is occupied). The cost is a factor $1/\text{fill-rate}\approx1.1$--$1.4$ in the
+equality phase --- constant, and small precisely in the well-filled regime where one
+would deploy. Security becomes trivial: $\Snd$'s view no longer contains
+\emph{any} $Y$-dependent object --- the layout dimensions $(L,\half)$ are public
+functions of $n_y$ alone --- so the simulator is immediate.
+\TODO{State and prove the simulation lemma; fold into the ssPMT security proof of
+the base paper. Also specify the deterministic rule for $L$ (e.g.\
+$L=\lceil(1+\delta)n_y/\half\rceil$ with public $\delta$) so that $L$ itself does
+not leak the sequencer's collision pattern; bound the failure probability that the
+sequencer needs more than $L$ layers.}
+
+\paragraph{Repair 2: leakage-explicit compression.}
+If the $n_y$-instance variant is truly needed, it must be stated as security with
+leakage: the ideal functionality additionally hands $\Snd$ the leakage
+\[
+  \mathcal{L}(Y)\;=\;\occ(Y)
+  \quad\big(\text{equivalently, up to simulation, the column-multiplicity profile }
+  (m_\tau)_{\tau\in[\half]}\big),
+\]
+together with the quantitative consequences of
+Sections~\ref{sec:leak:lr}--\ref{sec:leak:certificate}: per-candidate advantage
+$\approx1/\sqrt{2\pi\lambda}$ and exclusion-certificate rate $e^{-\lambda}$. A
+deployment bound $\lambda\ge\lambda_{\min}$ must be part of the parameter
+specification (ruling out sparse layouts), and composition with any second
+predictable coordinate system (Section~\ref{sec:leak:oracle}) must be forbidden
+explicitly. \TODO{Formalize as a leakage function in the simulation statement;
+decide whether to also charge the aggregate cardinality estimator
+(Section~\ref{sec:leak:aggregate}) depending on the enclosing functionality.}
+
+\paragraph{Non-repair: coordinate hiding.}
+Partial mitigations that randomize coordinates --- e.g.\ a secret per-layer rotation
+of the slot columns before disclosure --- do \emph{not} yield a clean claim: the
+disclosed pattern retains rotation-invariant structure (the multiset of gaps between
+occupied columns within a layer, cross-layer column correlations), so a
+pair-correlation variant of the test of Section~\ref{sec:leak:lr} survives. We do
+not recommend pursuing this direction. \VERIFY{Session-derived; if this route is
+ever needed, the pair-correlation attack should be worked out or refuted properly.}
+
+\subsection{Cost of the Repair}
+\label{sec:leak:cost}
+\TODO{Measure the ss-equality phase at $n_y$ vs.\ $L\half$ instances across the
+sweep parameters (fill rates $0.7$--$0.9$): communication and time, for the
+circuit-PSI-based instantiation~\cite{EC:PSTY19,AC:LPRST21}. Expected verdict: the
+full-layout repair costs $1.1$--$1.4\times$ in the equality phase only, which is a
+small fraction of end-to-end cost --- i.e.\ the safe default is cheap.}
+
+% ===========================================================================
+\section*{Acknowledgements}
+\TODO{grants.}
+
+% ===========================================================================
+% Bibliography
+% ===========================================================================
+\bibliographystyle{splncs04}
+\bibliography{abbrev2,crypto_crossref,mybib}
+
+% ===========================================================================
+\appendix
+
+\section{Redundancy Sweep for the BGV Indicator Decode}
+\label{app:epssweep}
+
+Table~\ref{tab:epssweep} reports the full redundancy sweep behind the discussion of
+Section~\ref{sec:dense:eval}, at $n=2^{20}$ with ring degree $N=2^{13}$ (BGV, coefficient
+modulus $\{60,50,50,60\}$, $\log p=40$). For each expansion $m/n=1+\eps$ the band width $\band$
+is the smallest width whose extrapolated encoding-failure rate is below $2^{-40}$ (probe-fit),
+and the sequencing span is $\zeta=\max(8,\lfloor0.65\band\rceil)$. Time is the full wall clock of
+one decode instance --- band generation and OKVS encoding, encryption of the transmitted
+ciphertexts, and the receiver-side decode (diagonal-plaintext encoding included) --- single-threaded%
+\TODO{machine spec}. Communication is the sender-to-receiver transmission with seeded (symmetric)
+serialization ($\approx0.18$\,MB per ciphertext); the dense layout additionally ships its two
+Galois keys ($1.4$\,MB, included) and, in the reverse direction, returns only $L/2$ output
+ciphertexts (half of the pre-rotated variant's $L$; not included in the table).
+
+The dense layout is measured in both rotation schedules: \emph{input column-swap} ($\colswap$ on
+each input ciphertext, reused across layers: $m/N+(\band{-}1)$ rotations) and \emph{output swap}
+(the swapped-orientation terms are folded through $D\odot\colswap(x)=\colswap(\colswap(D)\odot x)$,
+with $\colswap(D)$ a free plaintext row swap, and column-swapped once per \emph{output}:
+$L/2+(\band{-}1)/2$ rotations). Two features are visible. First, the pre-rotated communication is
+\emph{U-shaped} in $\eps$ (the $\band-1$ shifted copies grow as $\eps$ shrinks), bottoming out
+near $\eps\approx0.4$ at $43$\,MB, while the dense communication $\approx(1+\eps)\tfrac nN$
+ciphertexts is monotone --- so only the dense layout can exploit the small-$\eps$ regime
+($28.5$\,MB at $\eps=0.2$, $-38\%$). Second, the output-swap schedule dominates the input-swap
+one throughout (fewer rotations, and the key switch lands \emph{after} the plain-multiply sum,
+gaining $\approx1$ bit of noise budget); against pre-rotation its total time crosses near
+$\eps\approx0.6$--$0.7$ --- below, the dense layout is the faster one as well (the shared
+OKVS-encoding cost $O(n\band^2)$ dominates), above, pre-rotation stays ahead by $2$--$5\%$.
+
+\begin{table}[h]
+\centering
+\caption{Redundancy sweep of the BGV indicator decode at $n=2^{20}$, $N=2^{13}$. ``ctxts'' counts
+the ciphertexts the sender transmits (the dense layout adds two Galois keys, $1.4$\,MB,
+included in its comm); ``rot'' counts the receiver's Galois rotations --- $m/N+(\band{-}1)$ for the
+input-swap schedule, $L/2+(\band{-}1)/2$ for the output-swap one; time is the full wall clock
+(encode $+$ encrypt $+$ decode).}
+\label{tab:epssweep}
+\setlength{\tabcolsep}{3.4pt}
+\begin{tabular}{@{}ccc@{\hspace{11pt}}ccc@{\hspace{11pt}}cc@{\hspace{11pt}}cc@{\hspace{11pt}}cc@{}}
+\toprule
+&&& \multicolumn{3}{c@{\hspace{11pt}}}{Pre-rotated} & \multicolumn{2}{c@{\hspace{11pt}}}{Dense two-row} & \multicolumn{2}{c@{\hspace{11pt}}}{~~input swap} & \multicolumn{2}{c}{~~output swap}\\
+\cmidrule(r{11pt}){4-6}\cmidrule(r{11pt}){7-8}\cmidrule(r{11pt}){9-10}\cmidrule{11-12}
+$\eps$ & $\band$ & $\zeta$ & ctxts & comm & time & ctxts & comm & rot & time & rot & time\\
+&&&& (MB) & (s) && (MB) & & (s) & & (s)\\
+\midrule
+0.2 & 110 & 72 & 263 & 46.3 & 7.11 & 154 & 28.5 & 264 & 6.91 & 212 & 6.40\\
+0.3 &  81 & 53 & 247 & 43.5 & 5.02 & 167 & 30.8 & 247 & 4.90 & 200 & 4.84\\
+0.4 &  67 & 44 & 246 & 43.3 & 4.11 & 180 & 33.1 & 246 & 4.08 & 190 & 4.05\\
+0.5 &  58 & 38 & 249 & 43.8 & 3.62 & 192 & 35.2 & 250 & 3.66 & 191 & 3.58\\
+0.6 &  50 & 33 & 254 & 44.7 & 3.27 & 205 & 37.5 & 255 & 3.32 & 193 & 3.25\\
+0.7 &  43 & 28 & 260 & 45.8 & 2.89 & 218 & 39.8 & 260 & 2.97 & 191 & 2.90\\
+0.8 &  42 & 27 & 272 & 47.9 & 2.83 & 231 & 42.1 & 273 & 2.95 & 194 & 2.86\\
+0.9 &  38 & 25 & 281 & 49.5 & 2.66 & 244 & 44.4 & 282 & 2.77 & 193 & 2.67\\
+1.0 &  34 & 22 & 289 & 50.9 & 2.46 & 256 & 46.5 & 290 & 2.61 & 201 & 2.52\\
+1.1 &  31 & 20 & 299 & 52.6 & 2.34 & 269 & 48.8 & 299 & 2.48 & 207 & 2.42\\
+1.2 &  30 & 20 & 311 & 54.7 & 2.33 & 282 & 51.1 & 312 & 2.49 & 210 & 2.41\\
+1.3 &  30 & 20 & 324 & 57.0 & 2.35 & 295 & 53.3 & 325 & 2.50 & 209 & 2.41\\
+1.4 &  28 & 18 & 335 & 59.0 & 2.25 & 308 & 55.6 & 336 & 2.44 & 218 & 2.36\\
+1.5 &  27 & 18 & 346 & 60.9 & 2.24 & 320 & 57.7 & 346 & 2.42 & 218 & 2.32\\
+1.7 &  25 & 16 & 370 & 65.1 & 2.17 & 346 & 62.3 & 370 & 2.33 & 227 & 2.23\\
+2.0 &  23 & 15 & 406 & 71.5 & 2.12 & 384 & 69.0 & 406 & 2.32 & 242 & 2.22\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
