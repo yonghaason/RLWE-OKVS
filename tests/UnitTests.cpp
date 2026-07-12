@@ -7,6 +7,7 @@
 #include "GMW_tests.h"
 #include "SEQ_tests.h"
 #include "CPSI_tests.h"
+#include "SSPMT_tests.h"
 
 #include <functional>
 
@@ -23,5 +24,7 @@ namespace rlweOkvsTests {
     t.add("PSI_card_sum_32_test                ", psi_card_sum_32_test);
     t.add("Sequencing_test                  ", sequencing_test);
     t.add("CPSI_ssPMT_protocol_test         ", cpsi_sspmt_protocol_test);
+    t.add("SSPMT_fulllayout_protocol_test   ", sspmt_fulllayout_protocol_test);
+    t.add("GMW_iszero_test                  ", Gmw_iszero_test);
     });
 }

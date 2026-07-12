@@ -3,6 +3,7 @@ set(SRCS
     RPMT_tests.cpp
     OPRF_tests.cpp
     CPSI_tests.cpp
+    SSPMT_tests.cpp
     SEAL_tests.cpp
     PSO_tests.cpp
     GMW_tests.cpp

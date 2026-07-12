@@ -2,7 +2,9 @@
 
 #include <cstdlib>
 #include <memory>
+#include <numeric>
 #include <set>
+#include <utility>
 
 #include "../GMW/Gmw.h"
 #include "okvs.h"
@@ -152,24 +154,67 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
     mLayerBins[l][bin] = i;
   }
 
-  last_layer_per_bin.resize(mNumSlots);
+  // Full-layout mode: randomly permute the sequenced layers. The greedy
+  // sequencer front-loads each bin (its occupied layers are essentially a
+  // prefix 0..k_b, since it always fills the earliest admissible layer), so
+  // later layers are sparser. Running the equality over the whole rectangle
+  // already hides which slots are occupied, but the *positional* prior
+  // "early layers are denser" would still let an observer guess occupancy by
+  // layer index once any output bit is revealed. A single global permutation
+  // removes it: a prefix maps to a uniformly random subset of positions, so
+  // every (layer-position, bin) is occupied with the same probability. All
+  // downstream state (diagonals, masks, sent ciphertexts) then follows the
+  // permuted order, so correctness is untouched.
+  if (mFullLayout && mNumLayers > 1) {
+    std::vector<uint32_t> perm(mNumLayers);
+    std::iota(perm.begin(), perm.end(), 0u);
+    for (uint32_t i = mNumLayers - 1; i > 0; --i) {
+      uint32_t j = mPrng.get<uint32_t>() % (i + 1);
+      std::swap(perm[i], perm[j]);
+    }
+    std::vector<uint32_t> invperm(mNumLayers);
+    for (uint32_t p = 0; p < mNumLayers; ++p) invperm[perm[p]] = p;
 
-  for (uint32_t k = 0; k < mNumSlots; ++k) {
-    auto &nonempty_layers = bin_layers[k];
-    if (nonempty_layers.empty()) {
-      continue;
+    std::vector<std::vector<uint32_t>> permBins(mNumLayers);
+    std::vector<uint32_t> permMin(mNumLayers), permMax(mNumLayers);
+    for (uint32_t p = 0; p < mNumLayers; ++p) {
+      permBins[p] = std::move(mLayerBins[perm[p]]);
+      permMin[p] = mLayerMinBlock[perm[p]];
+      permMax[p] = mLayerMaxBlock[perm[p]];
     }
-    // last (nonempty) layer of k-th bin
-    uint32_t last_layer = 0;
-    for (auto &layeridx : nonempty_layers) {
-      last_layer = max(layeridx, last_layer);
+    mLayerBins.swap(permBins);
+    mLayerMinBlock.swap(permMin);
+    mLayerMaxBlock.swap(permMax);
+    for (uint32_t i = 0; i < mN; ++i)
+      mItemToLayerIdx[i] = invperm[mItemToLayerIdx[i]];
+  }
+
+  // The per-bin occupancy pattern (last_layer_per_bin, occupy_indicator_flat)
+  // is what the compact mode transmits so the receiver can pick out the
+  // occupied slots. The full-layout mode never reveals it -- that disclosure
+  // is exactly the layout-matching leak of the KKLS follow-up note (the
+  // receiver's band hash is public, so it can predict its own items' bins),
+  // so we skip building it here.
+  if (!mFullLayout) {
+    last_layer_per_bin.resize(mNumSlots);
+
+    for (uint32_t k = 0; k < mNumSlots; ++k) {
+      auto &nonempty_layers = bin_layers[k];
+      if (nonempty_layers.empty()) {
+        continue;
+      }
+      // last (nonempty) layer of k-th bin
+      uint32_t last_layer = 0;
+      for (auto &layeridx : nonempty_layers) {
+        last_layer = max(layeridx, last_layer);
+      }
+      last_layer_per_bin[k] = last_layer + 1;
+      BitVector oc_indicator(last_layer + 1);
+      for (auto &layeridx : nonempty_layers) {
+        oc_indicator[layeridx] = 1;
+      }
+      occupy_indicator_flat.append(oc_indicator);
     }
-    last_layer_per_bin[k] = last_layer + 1;
-    BitVector oc_indicator(last_layer + 1);
-    for (auto &layeridx : nonempty_layers) {
-      oc_indicator[layeridx] = 1;
-    }
-    occupy_indicator_flat.append(oc_indicator);
   }
 
   ot_idx.resize(mN);
@@ -185,6 +230,9 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
     }
   } else {
     maskings.resize(mN);
+    if (mFullLayout) {
+      maskings_full.resize(static_cast<size_t>(mNumLayers) * mNumSlots);
+    }
     ptxts_mask.resize(mNumLayers);
     vector<vector<uint64_t>> raw_masks(mNumLayers);
     for (size_t lay = 0; lay < mNumLayers; lay++) {
@@ -193,6 +241,13 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
       for (uint32_t bin = 0; bin < mNumSlots; bin++) {
         raw_masks[lay][bin] =
             seal::util::barrett_reduce_64(raw_masks[lay][bin], mModulus);
+        // In full-layout mode every slot -- occupied or not -- contributes a
+        // mask to the equality. An empty slot decodes to 0, so the sender's
+        // mask r and the receiver's r - indicator disagree (indicator != 0)
+        // and it shares a 0, just like a non-member.
+        if (mFullLayout) {
+          maskings_full[lay * mNumSlots + bin] = raw_masks[lay][bin];
+        }
         if (mLayerBins[lay][bin] != UINT32_MAX) {
           ot_idx[idx] = mLayerBins[lay][bin];
           maskings[idx++] = raw_masks[lay][bin];
@@ -245,25 +300,33 @@ Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
   assert(!mRpmt && "Sender obtains result only when ssPMT.");
   co_await run(Y, chl);
 
-  // GMW with maskings
+  // GMW with maskings. In the full-layout mode the equality runs over every
+  // (layer, bin) slot, so there are L*H instances fed from maskings_full;
+  // in the compact mode it runs over the n_y occupied slots from maskings.
+  // The bit width is set by the number of *potential matches* (n_y), not the
+  // instance count: empty slots never match (indicator != 0), so they add no
+  // false positives.
+  const u64 nInst = mFullLayout ? getLayoutSize() : Y.size();
+  const std::vector<uint64_t> &masks = mFullLayout ? maskings_full : maskings;
+
   u64 keyBitLength = 40 + oc::log2ceil(Y.size());
   u64 keyByteLength = oc::divCeil(keyBitLength, 8);
 
   oc::Matrix<u8> gmwin;
-  gmwin.resize(Y.size(), keyByteLength, oc::AllocType::Uninitialized);
-  for (size_t i = 0; i < Y.size(); i++) {
-    memcpy(&gmwin(i, 0), &maskings[i], keyByteLength);
+  gmwin.resize(nInst, keyByteLength, oc::AllocType::Uninitialized);
+  for (size_t i = 0; i < nInst; i++) {
+    memcpy(&gmwin(i, 0), &masks[i], keyByteLength);
   }
 
   Gmw gmw;
   gmw.setTimer(getTimer());
   auto cir = isZeroCircuit(keyBitLength);
-  gmw.init(Y.size(), cir, 1, mOTeBatchSize, 0, mPrng.get());
+  gmw.init(nInst, cir, 1, mOTeBatchSize, 0, mPrng.get());
   gmw.setInput(0, gmwin);
   co_await gmw.run(chl);
 
   auto rr = gmw.getOutputView(0);
-  results.resize(Y.size());
+  results.resize(nInst);
   std::copy(rr.begin(), rr.end(), results.data());
   setTimePoint("Sender::Online GMW");
 }
@@ -543,8 +606,12 @@ Proto SspmtSender::send_decoded_chunks(
   cout << "Sender sends " << mNumLayers << " decoded ctxts, " << sentBytes
        << " Bytes" << endl;
 
-  co_await chl.send(move(last_layer_per_bin));
-  co_await chl.send(move(occupy_indicator_flat));
+  // The occupancy is transmitted only in the compact mode; the full-layout
+  // mode deliberately withholds it (see sequencing()).
+  if (!mFullLayout) {
+    co_await chl.send(move(last_layer_per_bin));
+    co_await chl.send(move(occupy_indicator_flat));
+  }
 
   setTimePoint("Sender::Encrypted OKVS Decoding & Send Back");
 }
@@ -588,6 +655,44 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
 
   vector<Ciphertext> decoded_in_he;
   co_await recv_decoded_chunks(decoded_in_he, chl);
+
+  if (mFullLayout) {
+    // No occupancy is received. Decrypt every layer and run the equality over
+    // the whole L x H rectangle: slot (layer i, bin b) matches iff the Y-item
+    // sitting there (if any) is in X; empty slots decode to 0 and never match.
+    const size_t L = decoded_in_he.size();
+    const size_t nInst = L * mNumSlots;
+
+    u64 keyBitLength = 40 + oc::log2ceil(mNsender);
+    u64 keyByteLength = oc::divCeil(keyBitLength, 8);
+    oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
+
+    vector<uint64_t> decodeVec(mNumSlots);
+    Plaintext ptxt;
+    for (size_t i = 0; i < L; ++i) {
+      mDecryptor->decrypt(decoded_in_he[i], ptxt);
+      mBatchEncoder->decode(ptxt, decodeVec);
+      for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+        auto tmp = util::sub_uint_mod(decodeVec[bin], mIndicatorStr, mModulus);
+        memcpy(&gmwin(i * mNumSlots + bin, 0), &tmp, keyByteLength);
+      }
+    }
+    setTimePoint("Receiver::Decrypt (full layout)");
+
+    Gmw gmw;
+    gmw.setTimer(getTimer());
+    auto cir = isZeroCircuit(keyBitLength);
+    gmw.init(nInst, cir, 1, mOTeBatchSize, 1, mPrng.get());
+    gmw.setInput(0, gmwin);
+    co_await gmw.run(chl);
+
+    auto rr = gmw.getOutputView(0);
+    results.resize(nInst);
+    std::copy(rr.begin(), rr.end(), results.data());
+    setTimePoint("Receiver::Online GMW (full layout)");
+    co_return;
+  }
+
   co_await chl.recvResize(last_layer_per_bin);
 
   auto len = 0;

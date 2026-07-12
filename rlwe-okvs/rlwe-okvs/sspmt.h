@@ -90,23 +90,40 @@ namespace rlweOkvs
 
         std::vector<uint32_t> ot_idx;
         std::vector<uint64_t> maskings;
+        // Full-layout masks, one per (layer, bin) slot, layer-major:
+        // maskings_full[lay * mNumSlots + bin]. Populated only when
+        // mFullLayout is set; the equality then runs over every slot.
+        std::vector<uint64_t> maskings_full;
         std::vector<seal::Plaintext> ptxts_mask;
-        
+
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
 
         bool mRpmt = false;
-        uint64_t mOTeBatchSize = 1ull << 19; 
-        
+        // Full-layout ss-PMT: run the equality over the ENTIRE L x H layout
+        // rather than only the n_y occupied slots, and never transmit the
+        // occupancy. This closes the layout-disclosure leak (the receiver
+        // uses a public band hash, so it can predict its own items' slot
+        // columns; occupancy would then be a membership oracle -- see the
+        // KKLS follow-up note, Topic B). The sequenced layers are randomly
+        // permuted so the greedy front-loading (early layers dense, later
+        // layers sparse) does not survive as a positional prior either.
+        bool mFullLayout = false;
+        uint64_t mOTeBatchSize = 1ull << 19;
+
     public:
         void sequencing(const std::vector<uint32_t>& start_pos_spacing);
-    
+
         void init(
-            uint32_t n, uint32_t nReceiver, 
+            uint32_t n, uint32_t nReceiver,
             sspmtParams ssParams, oc::block seed = oc::OneBlock);
 
         void rpmt_on() {mRpmt = true;};
+        void fullLayoutOn() {mFullLayout = true;};
         auto get_ot_idx() {return ot_idx;};
         u32 getNumLayers() {return mNumLayers;};
+        // Number of equality instances actually run: n_y in the compact
+        // mode, L * H in the full-layout mode.
+        u64 getLayoutSize() {return (u64)mNumLayers * mNumSlots;};
 
         Proto run(
             const std::vector<oc::block> &Y, 
@@ -153,18 +170,20 @@ namespace rlweOkvs
         std::vector<std::vector<uint32_t>> mLayerToBins;
 
         bool mRpmt = false;
+        bool mFullLayout = false;
         uint64_t mOTeBatchSize = 1ull << 19;
-        
+
 
     public:
         void init(
-            uint32_t n, uint32_t nSender, 
+            uint32_t n, uint32_t nSender,
             sspmtParams ssParams, oc::block seed = oc::ZeroBlock);
 
         void rpmt_on() {mRpmt = true;};
+        void fullLayoutOn() {mFullLayout = true;};
 
         Proto run(
-            const std::vector<oc::block> &X, 
+            const std::vector<oc::block> &X,
             oc::BitVector &results,
             Socket &chl);
 
