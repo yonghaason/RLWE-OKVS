@@ -39,8 +39,11 @@ void Gmw_iszero_test(const oc::CLP& cmd)
     auto e1 = pool1.make_work();
     pool1.create_threads(nt);
 
-    // auto socket = coproto::LocalAsyncSocket::makePair();
-    auto socket = coproto::AsioSocket::makePair();
+    // In-memory socket, matching the CPSI/OKVS ss-PMT tests, so the GMW cost
+    // measured here is directly comparable to the GMW phase inside those
+    // protocols. (The AsioSocket TCP-loopback path is ~3x slower for the
+    // silent-OT triple generation and is not a like-for-like comparison.)
+    auto socket = coproto::LocalAsyncSocket::makePair();
     socket[0].setExecutor(pool0);
     socket[1].setExecutor(pool1);
     
