@@ -3,6 +3,8 @@
 #include "band_okvs.h"
 #include "../GMW/Gmw.h"
 
+#include "macoro/when_all.h"
+
 #include "cryptoTools/Common/CuckooIndex.h"
 #include "cryptoTools/Common/Matrix.h"
 
@@ -125,43 +127,56 @@ namespace rlweOkvs
         //   hint[key] = value ^ F(key)
         // over the 3*|Y| points, so its size scales with |Y|, not numBins.
         // ---------------------------------------------------------------
-        OprfSender oprf;
-        oprf.init(numPoints, mRecverSize, mPrng.get());
-        vector<block> F;
-        co_await oprf.run(opprfKeys, F, chl);
-
-        setTimePoint("CpsiSender::oprf");
-
-        for (u64 k = 0; k < numPoints; ++k)
-            opprfValues[k] ^= F[k];
-
-        // Note: BandOkvs is hardwired to 128-bit values (SIMD decode paths),
-        // so each hint entry ships 16 bytes even though keyByteLength (~8)
-        // would suffice; vole-psi's byte-width Baxos hint is narrower per
-        // entry. A 64-bit-value band OKVS would halve this term.
-        band_okvs::BandOkvs okvs;
-        okvs.Init(numPoints, opprfHintLength(mSenderSize), kBandLength, mPrng.get());
-        vector<block> hint(okvs.Size());
-        if (!okvs.Encode(opprfKeys.data(), opprfValues.data(), hint.data()))
-            throw std::runtime_error(
-                "OPPRF hint encoding failed: duplicate items in Y, "
-                "or a band-OKVS failure event. " LOCATION);
-
-        co_await chl.send(std::move(hint));
-
-        setTimePoint("CpsiSender::opprf hint");
-
         // ---------------------------------------------------------------
-        // ss-equality (GMW): share of 1(receiver's OPPRF output == r[i])
-        // for every bin i, i.e. of the membership flag.
+        // ss-equality (GMW): share of 1(receiver's OPPRF output == r[i]) for
+        // every bin i. numBins is known already, so the (input-independent)
+        // triple generation is started up front on a forked channel and runs
+        // concurrently with the OPRF+OPPRF phase on the base channel; only the
+        // online GMW waits for the equality inputs. (Needs >=2 threads/party
+        // to parallelize; with 1 thread the two just interleave.)
         // ---------------------------------------------------------------
         volePSI::Gmw gmw;
         if (mTimer)
             gmw.setTimer(getTimer());
         auto cir = volePSI::isZeroCircuit(keyBitLength);
         gmw.init(numBins, cir, mNumThreads, mOTeBatchSize, 1, mPrng.get());
+
+        auto chlGmw = chl.fork();
+        // OPPRF phase (base channel). Bound to a named local before awaiting so
+        // the coroutine's by-reference captures stay alive across the join.
+        auto opprfBody = [&, this]() -> Proto {
+            OprfSender oprf;
+            oprf.init(numPoints, mRecverSize, mPrng.get());
+            vector<block> F;
+            co_await oprf.run(opprfKeys, F, chl);
+            setTimePoint("CpsiSender::oprf");
+
+            for (u64 k = 0; k < numPoints; ++k)
+                opprfValues[k] ^= F[k];
+
+            // Note: BandOkvs is hardwired to 128-bit values (SIMD decode
+            // paths), so each hint entry ships 16 bytes even though
+            // keyByteLength (~8) would suffice; vole-psi's byte-width Baxos
+            // hint is narrower. A 64-bit-value band OKVS would halve this term.
+            band_okvs::BandOkvs okvs;
+            okvs.Init(numPoints, opprfHintLength(mSenderSize), kBandLength,
+                      mPrng.get());
+            vector<block> hint(okvs.Size());
+            if (!okvs.Encode(opprfKeys.data(), opprfValues.data(), hint.data()))
+                throw std::runtime_error(
+                    "OPPRF hint encoding failed: duplicate items in Y, "
+                    "or a band-OKVS failure event. " LOCATION);
+            co_await chl.send(std::move(hint));
+            setTimePoint("CpsiSender::opprf hint");
+        };
+        auto opprf = opprfBody();
+        auto tg = gmw.generateTriple(chlGmw);
+        auto both = co_await macoro::when_all_ready(std::move(opprf), std::move(tg));
+        std::get<0>(both).result();
+        std::get<1>(both).result();
+
         gmw.setInput(0, binKeys);
-        co_await gmw.run(chl);
+        co_await gmw.run(chl);  // triples ready -> online only
 
         auto shares = gmw.getOutputView(0);
         ret.mNumBins = numBins;
@@ -228,52 +243,60 @@ namespace rlweOkvs
         }
 
         // ---------------------------------------------------------------
-        // OPPRF evaluation: OPRF at our |X| bin keys, plus the local
-        // decode of the sender's hint at the same keys.
-        // ---------------------------------------------------------------
-        OprfReceiver oprf;
-        oprf.init(mRecverSize, kNumHashes * mSenderSize, mPrng.get());
-        vector<block> F;
-        co_await oprf.run(queries, F, chl);
-
-        setTimePoint("CpsiReceiver::oprf");
-
-        vector<block> hint;
-        co_await chl.recvResize(hint);
-
-        band_okvs::BandOkvs okvs;
-        okvs.Init(mRecverSize, opprfHintLength(mSenderSize), kBandLength);
-        if (hint.size() != static_cast<u64>(okvs.Size()))
-            throw std::runtime_error("unexpected OPPRF hint size " LOCATION);
-
-        vector<block> outputs(mRecverSize);
-        okvs.Decode(queries.data(), hint.data(), outputs.data());
-        for (u64 k = 0; k < mRecverSize; ++k)
-            outputs[k] ^= F[k];
-
-        setTimePoint("CpsiReceiver::opprf decode");
-
-        // ---------------------------------------------------------------
         // ss-equality (GMW), on the low keyBitLength bits of the OPPRF
         // outputs, against the sender's bin keys. The equality covers every
         // bin -- empty ones with fresh randomness -- so the sender learns
-        // nothing about which bins are occupied.
+        // nothing about which bins are occupied. numBins is known, so the
+        // (input-independent) triple generation runs on a forked channel
+        // concurrently with the OPRF+OPPRF phase on the base channel; only
+        // the online GMW waits for the outputs.
         // ---------------------------------------------------------------
         u64 keyBitLength = equalityBitLength(mSsp, numBins);
         u64 keyByteLength = divCeil(keyBitLength, 8);
-
-        Matrix<u8> gmwIn(numBins, keyByteLength, AllocType::Uninitialized);
-        mPrng.get<u8>(gmwIn);
-        for (u64 k = 0; k < mRecverSize; ++k)
-            memcpy(&gmwIn(queryBin[k], 0), &outputs[k], keyByteLength);
 
         volePSI::Gmw gmw;
         if (mTimer)
             gmw.setTimer(getTimer());
         auto cir = volePSI::isZeroCircuit(keyBitLength);
         gmw.init(numBins, cir, mNumThreads, mOTeBatchSize, 0, mPrng.get());
+
+        // OPPRF evaluation (base channel): OPRF at our |X| bin keys plus the
+        // local decode of the sender's hint. Fills `outputs`.
+        vector<block> outputs(mRecverSize);
+        auto chlGmw = chl.fork();
+        auto opprfBody = [&, this]() -> Proto {
+            OprfReceiver oprf;
+            oprf.init(mRecverSize, kNumHashes * mSenderSize, mPrng.get());
+            vector<block> F;
+            co_await oprf.run(queries, F, chl);
+            setTimePoint("CpsiReceiver::oprf");
+
+            vector<block> hint;
+            co_await chl.recvResize(hint);
+
+            band_okvs::BandOkvs okvs;
+            okvs.Init(mRecverSize, opprfHintLength(mSenderSize), kBandLength);
+            if (hint.size() != static_cast<u64>(okvs.Size()))
+                throw std::runtime_error("unexpected OPPRF hint size " LOCATION);
+
+            okvs.Decode(queries.data(), hint.data(), outputs.data());
+            for (u64 k = 0; k < mRecverSize; ++k)
+                outputs[k] ^= F[k];
+            setTimePoint("CpsiReceiver::opprf decode");
+        };
+        auto opprf = opprfBody();
+        auto tg = gmw.generateTriple(chlGmw);
+        auto both = co_await macoro::when_all_ready(std::move(opprf), std::move(tg));
+        std::get<0>(both).result();
+        std::get<1>(both).result();
+
+        Matrix<u8> gmwIn(numBins, keyByteLength, AllocType::Uninitialized);
+        mPrng.get<u8>(gmwIn);
+        for (u64 k = 0; k < mRecverSize; ++k)
+            memcpy(&gmwIn(queryBin[k], 0), &outputs[k], keyByteLength);
+
         gmw.setInput(0, gmwIn);
-        co_await gmw.run(chl);
+        co_await gmw.run(chl);  // triples ready -> online only
 
         auto shares = gmw.getOutputView(0);
         ret.mNumBins = numBins;
