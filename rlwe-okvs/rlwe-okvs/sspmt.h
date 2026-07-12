@@ -195,6 +195,16 @@ namespace rlweOkvs
             std::vector<seal::Ciphertext> &decoded_in_he,
             Socket &chl);
 
+        // Receive the decoded ciphertexts when the layer count is already
+        // known (read separately). Split out of recv_decoded_chunks so the
+        // full-layout mode can learn the layer count first, then receive the
+        // ciphertexts on the base channel while generating GMW triples on a
+        // forked channel concurrently.
+        Proto recv_decoded_body(
+            std::vector<seal::Ciphertext> &decoded_in_he,
+            uint32_t numLayers,
+            Socket &chl);
+
         void decrypt(
             const std::vector<seal::Ciphertext> &decoded_in_he, 
             std::vector<uint64_t> &dec_results);        

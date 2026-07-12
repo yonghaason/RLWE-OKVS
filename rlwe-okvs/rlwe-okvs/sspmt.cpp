@@ -11,6 +11,8 @@
 #include "seal/util/numth.h"
 #include "seal/util/uintarithsmallmod.h"
 
+#include "macoro/when_all.h"
+
 using namespace std;
 using namespace seal;
 using namespace oc;
@@ -298,35 +300,66 @@ Proto SspmtSender::run(const std::vector<oc::block> &Y, Socket &chl) {
 Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
                        Socket &chl) {
   assert(!mRpmt && "Sender obtains result only when ssPMT.");
-  co_await run(Y, chl);
-
-  // GMW with maskings. In the full-layout mode the equality runs over every
-  // (layer, bin) slot, so there are L*H instances fed from maskings_full;
-  // in the compact mode it runs over the n_y occupied slots from maskings.
-  // The bit width is set by the number of *potential matches* (n_y), not the
-  // instance count: empty slots never match (indicator != 0), so they add no
-  // false positives.
-  const u64 nInst = mFullLayout ? getLayoutSize() : Y.size();
-  const std::vector<uint64_t> &masks = mFullLayout ? maskings_full : maskings;
 
   u64 keyBitLength = 40 + oc::log2ceil(Y.size());
   u64 keyByteLength = oc::divCeil(keyBitLength, 8);
+  auto cir = isZeroCircuit(keyBitLength);
+
+  if (mFullLayout) {
+    // Overlap the (input-independent) GMW triple generation with the
+    // homomorphic decode. The sequencing decides mNumLayers, so we can size
+    // the GMW right after preprocess; the triple generation then runs on a
+    // forked channel while the decode streams back on the base channel. This
+    // hides the ~9s decode under the ~11s triple generation and keeps the
+    // receiver busy instead of idle. Needs >=2 executor threads per party to
+    // actually run in parallel (both stages are CPU-bound).
+    preprocess(Y);
+    vector<vector<Ciphertext>> encoded_in_he(mNumBatch);
+    co_await recv_encoded_chunks(encoded_in_he, chl);
+
+    const u64 nInst = getLayoutSize();
+    Gmw gmw;
+    gmw.setTimer(getTimer());
+    gmw.init(nInst, cir, 1, mOTeBatchSize, 0, mPrng.get());
+
+    auto chlGmw = chl.fork();
+    auto he = send_decoded_chunks(encoded_in_he, chl);
+    auto tg = gmw.generateTriple(chlGmw);
+    auto both = co_await macoro::when_all_ready(std::move(he), std::move(tg));
+    std::get<0>(both).result();
+    std::get<1>(both).result();
+
+    oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
+    for (size_t i = 0; i < nInst; i++) {
+      memcpy(&gmwin(i, 0), &maskings_full[i], keyByteLength);
+    }
+    gmw.setInput(0, gmwin);
+    co_await gmw.run(chl);  // triples already generated -> online only
+
+    auto rr = gmw.getOutputView(0);
+    results.resize(nInst);
+    std::copy(rr.begin(), rr.end(), results.data());
+    setTimePoint("Sender::Online GMW");
+    co_return;
+  }
+
+  // Compact mode: HE first, then GMW over the n_y occupied slots.
+  co_await run(Y, chl);
 
   oc::Matrix<u8> gmwin;
-  gmwin.resize(nInst, keyByteLength, oc::AllocType::Uninitialized);
-  for (size_t i = 0; i < nInst; i++) {
-    memcpy(&gmwin(i, 0), &masks[i], keyByteLength);
+  gmwin.resize(Y.size(), keyByteLength, oc::AllocType::Uninitialized);
+  for (size_t i = 0; i < Y.size(); i++) {
+    memcpy(&gmwin(i, 0), &maskings[i], keyByteLength);
   }
 
   Gmw gmw;
   gmw.setTimer(getTimer());
-  auto cir = isZeroCircuit(keyBitLength);
-  gmw.init(nInst, cir, 1, mOTeBatchSize, 0, mPrng.get());
+  gmw.init(Y.size(), cir, 1, mOTeBatchSize, 0, mPrng.get());
   gmw.setInput(0, gmwin);
   co_await gmw.run(chl);
 
   auto rr = gmw.getOutputView(0);
-  results.resize(nInst);
+  results.resize(Y.size());
   std::copy(rr.begin(), rr.end(), results.data());
   setTimePoint("Sender::Online GMW");
 }
@@ -654,19 +687,35 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
   co_await send_encoded_chunks(X, chl);
 
   vector<Ciphertext> decoded_in_he;
-  co_await recv_decoded_chunks(decoded_in_he, chl);
 
   if (mFullLayout) {
-    // No occupancy is received. Decrypt every layer and run the equality over
-    // the whole L x H rectangle: slot (layer i, bin b) matches iff the Y-item
-    // sitting there (if any) is in X; empty slots decode to 0 and never match.
-    const size_t L = decoded_in_he.size();
-    const size_t nInst = L * mNumSlots;
+    // Read the layer count first so we can size the GMW, then receive the
+    // decoded ciphertexts on the base channel while generating the
+    // (input-independent) GMW triples on a forked channel concurrently --
+    // filling the idle wait for the sender's homomorphic decode. No occupancy
+    // is received. Decrypt every layer and run the equality over the whole
+    // L x H rectangle: slot (layer i, bin b) matches iff the Y-item sitting
+    // there (if any) is in X; empty slots decode to 0 and never match.
+    uint32_t L;
+    co_await chl.recv(L);
+    const size_t nInst = static_cast<size_t>(L) * mNumSlots;
 
     u64 keyBitLength = 40 + oc::log2ceil(mNsender);
     u64 keyByteLength = oc::divCeil(keyBitLength, 8);
-    oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
 
+    Gmw gmw;
+    gmw.setTimer(getTimer());
+    auto cir = isZeroCircuit(keyBitLength);
+    gmw.init(nInst, cir, 1, mOTeBatchSize, 1, mPrng.get());
+
+    auto chlGmw = chl.fork();
+    auto he = recv_decoded_body(decoded_in_he, L, chl);
+    auto tg = gmw.generateTriple(chlGmw);
+    auto both = co_await macoro::when_all_ready(std::move(he), std::move(tg));
+    std::get<0>(both).result();
+    std::get<1>(both).result();
+
+    oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
     vector<uint64_t> decodeVec(mNumSlots);
     Plaintext ptxt;
     for (size_t i = 0; i < L; ++i) {
@@ -679,12 +728,8 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
     }
     setTimePoint("Receiver::Decrypt (full layout)");
 
-    Gmw gmw;
-    gmw.setTimer(getTimer());
-    auto cir = isZeroCircuit(keyBitLength);
-    gmw.init(nInst, cir, 1, mOTeBatchSize, 1, mPrng.get());
     gmw.setInput(0, gmwin);
-    co_await gmw.run(chl);
+    co_await gmw.run(chl);  // triples already generated -> online only
 
     auto rr = gmw.getOutputView(0);
     results.resize(nInst);
@@ -692,6 +737,8 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
     setTimePoint("Receiver::Online GMW (full layout)");
     co_return;
   }
+
+  co_await recv_decoded_chunks(decoded_in_he, chl);
 
   co_await chl.recvResize(last_layer_per_bin);
 
@@ -813,17 +860,22 @@ Proto SspmtReceiver::recv_decoded_chunks(
     std::vector<seal::Ciphertext> &decoded_in_he, Socket &chl) {
   uint32_t decoded_he_size;
   co_await chl.recv(decoded_he_size);
+  co_await recv_decoded_body(decoded_in_he, decoded_he_size, chl);
+}
 
-  decoded_in_he.resize(decoded_he_size);
+Proto SspmtReceiver::recv_decoded_body(
+    std::vector<seal::Ciphertext> &decoded_in_he, uint32_t numLayers,
+    Socket &chl) {
+  decoded_in_he.resize(numLayers);
   SEALContext context = *mContext;
   string recvstring;
   stringstream recvstream;
 
   const uint32_t chunkSize = decodedLayerChunk();
-  for (uint32_t layerBegin = 0; layerBegin < decoded_he_size;
+  for (uint32_t layerBegin = 0; layerBegin < numLayers;
        layerBegin += chunkSize) {
     const uint32_t layerEnd =
-        std::min<uint32_t>(decoded_he_size, layerBegin + chunkSize);
+        std::min<uint32_t>(numLayers, layerBegin + chunkSize);
     co_await chl.recvResize(recvstring);
 
     recvstream.clear();
