@@ -5,6 +5,7 @@ set(SRCS
     "band_okvs/band_okvs.cc"
     "band_okvs/band.cc"
     "band_okvs/oprf.cpp"
+    "band_okvs/cpsi.cpp"
     "GMW/Circuit.cpp"
     "GMW/Gmw.cpp"
     "GMW/SilentTripleGen.cpp"
