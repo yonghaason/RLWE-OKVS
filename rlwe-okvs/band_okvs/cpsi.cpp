@@ -120,12 +120,13 @@ namespace rlweOkvs
         // ---------------------------------------------------------------
         // OPPRF = OPRF + OKVS hint. We evaluate the OPRF at our 3*|Y|
         // programmed keys; the interactive cost (the VOLE) is sized by the
-        // receiver's numBins evaluation points. The hint encodes
+        // receiver's |X| evaluation points (its real bins -- empty bins
+        // never touch the OPPRF). The hint encodes
         //   hint[key] = value ^ F(key)
         // over the 3*|Y| points, so its size scales with |Y|, not numBins.
         // ---------------------------------------------------------------
         OprfSender oprf;
-        oprf.init(numPoints, numBins, mPrng.get());
+        oprf.init(numPoints, mRecverSize, mPrng.get());
         vector<block> F;
         co_await oprf.run(opprfKeys, F, chl);
 
@@ -196,40 +197,42 @@ namespace rlweOkvs
         setTimePoint("CpsiReceiver::cuckoo");
 
         // ---------------------------------------------------------------
-        // OPPRF queries: bin i holding item x under hash function j queries
-        // AES_j(x); an empty bin queries the (distinct) constant block(i, 0),
-        // which the sender programmed nowhere, so its output is
-        // pseudorandom and the equality below shares a 0.
+        // OPPRF queries: only the |X| REAL bins touch the OPPRF -- the bin
+        // holding item x under hash function j queries AES_j(x). Empty bins
+        // need no OPPRF output at all: they enter the equality below with
+        // private uniform randomness (and hence share a 0 up to a
+        // 2^-keyBitLength collision, the same bound as a non-member).
+        // vole-psi instead evaluates at all numBins bins, dummies included;
+        // the interactive OPRF here is sized by |X|, not numBins.
         // ---------------------------------------------------------------
-        vector<block> queries(numBins);
+        vector<block> queries(mRecverSize);
+        vector<u64> queryBin(mRecverSize);
         ret.mMapping.assign(mRecverSize, ~u64(0));
         {
             auto hashers = opprfHashers(cuckooSeed);
+            u64 k = 0;
             for (u64 i = 0; i < numBins; ++i)
             {
                 auto& bin = cuckoo.mBins[i];
                 if (!bin.isEmpty())
                 {
                     auto b = bin.idx();
-                    queries[i] = hashers[bin.hashIdx()].hashBlock(X[b]);
+                    queries[k] = hashers[bin.hashIdx()].hashBlock(X[b]);
+                    queryBin[k] = i;
                     ret.mMapping[b] = i;
-                }
-                else
-                {
-                    queries[i] = block(i, 0);
+                    ++k;
                 }
             }
-        }
-        for (u64 b = 0; b < mRecverSize; ++b)
-            if (ret.mMapping[b] == ~u64(0))
+            if (k != mRecverSize)
                 throw std::runtime_error("cuckoo insertion failed " LOCATION);
+        }
 
         // ---------------------------------------------------------------
-        // OPPRF evaluation: OPRF at our numBins bin keys, plus the local
+        // OPPRF evaluation: OPRF at our |X| bin keys, plus the local
         // decode of the sender's hint at the same keys.
         // ---------------------------------------------------------------
         OprfReceiver oprf;
-        oprf.init(numBins, kNumHashes * mSenderSize, mPrng.get());
+        oprf.init(mRecverSize, kNumHashes * mSenderSize, mPrng.get());
         vector<block> F;
         co_await oprf.run(queries, F, chl);
 
@@ -239,27 +242,30 @@ namespace rlweOkvs
         co_await chl.recvResize(hint);
 
         band_okvs::BandOkvs okvs;
-        okvs.Init(numBins, opprfHintLength(mSenderSize), kBandLength);
+        okvs.Init(mRecverSize, opprfHintLength(mSenderSize), kBandLength);
         if (hint.size() != static_cast<u64>(okvs.Size()))
             throw std::runtime_error("unexpected OPPRF hint size " LOCATION);
 
-        vector<block> outputs(numBins);
+        vector<block> outputs(mRecverSize);
         okvs.Decode(queries.data(), hint.data(), outputs.data());
-        for (u64 i = 0; i < numBins; ++i)
-            outputs[i] ^= F[i];
+        for (u64 k = 0; k < mRecverSize; ++k)
+            outputs[k] ^= F[k];
 
         setTimePoint("CpsiReceiver::opprf decode");
 
         // ---------------------------------------------------------------
         // ss-equality (GMW), on the low keyBitLength bits of the OPPRF
-        // outputs, against the sender's bin keys.
+        // outputs, against the sender's bin keys. The equality covers every
+        // bin -- empty ones with fresh randomness -- so the sender learns
+        // nothing about which bins are occupied.
         // ---------------------------------------------------------------
         u64 keyBitLength = equalityBitLength(mSsp, numBins);
         u64 keyByteLength = divCeil(keyBitLength, 8);
 
         Matrix<u8> gmwIn(numBins, keyByteLength, AllocType::Uninitialized);
-        for (u64 i = 0; i < numBins; ++i)
-            memcpy(&gmwIn(i, 0), &outputs[i], keyByteLength);
+        mPrng.get<u8>(gmwIn);
+        for (u64 k = 0; k < mRecverSize; ++k)
+            memcpy(&gmwIn(queryBin[k], 0), &outputs[k], keyByteLength);
 
         volePSI::Gmw gmw;
         if (mTimer)

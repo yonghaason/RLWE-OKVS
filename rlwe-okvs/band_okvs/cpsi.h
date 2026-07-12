@@ -22,10 +22,17 @@ namespace rlweOkvs
     //     - the OPRF is the VOLE OPRF of band_okvs/oprf.{h,cpp} (RR22 style,
     //       band OKVS instead of the RR22 Baxos), and
     //     - the OPPRF hint is a band OKVS over the sender's 3*|Y| programmed
-    //       points. (vole-psi likewise programs exactly 3*n_s points -- the
-    //       hint never scales with the number of cuckoo bins; only the
-    //       receiver's interactive OPRF inputs scale with numBins.)
-    //  2. The payload-sharing machinery of RsCpsi (associated values and their
+    //       points (vole-psi likewise programs exactly 3*n_s points -- the
+    //       hint never scales with the number of cuckoo bins).
+    //  2. The receiver runs the OPPRF only at its |X| REAL bins, not at all
+    //     numBins bins as vole-psi does: an empty bin needs no OPPRF output,
+    //     it can feed private uniform randomness straight into the equality
+    //     (it then shares a 0 up to the same 2^-ssp collision bound as a
+    //     non-member). The interactive cost therefore scales with |X| and
+    //     3*|Y| only; nothing interactive scales with numBins except the
+    //     equality itself, which must cover every bin so that the sender
+    //     learns nothing about which bins are occupied.
+    //  3. The payload-sharing machinery of RsCpsi (associated values and their
     //     Gmw muxing) is omitted: the parties obtain XOR shares of the
     //     membership flags only, which is all an ss-PMT needs.
     //
