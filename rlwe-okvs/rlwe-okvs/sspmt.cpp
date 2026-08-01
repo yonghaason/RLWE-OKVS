@@ -477,33 +477,15 @@ void SspmtSender::preprocess(const std::vector<oc::block> &Y) {
   std::vector<uint32_t> write_ptr(B_CHUNK + 1);
   std::vector<Contrib> flat_contribs;
 
-  std::vector<uint64_t> padVec(mNumSlots);
-
   for (uint32_t i = 0; i < mNumLayers; ++i) {
-    uint32_t Bmin = mLayerMinBlock[i];
-    uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
-
+    // Padding layers get their (single) random multiplier in
+    // encrypted_decode(); nothing to prepare here.
     if (mLayerIsPadding[i]) {
-      // No item to encode, but the layer still has to produce ciphertexts that
-      // are indistinguishable from a real layer's: same diagonals, same
-      // multiply-and-accumulate chain, hence comparable noise. Random (dense)
-      // diagonals give that; the decoded slots then hold uniform garbage,
-      // which the equality rejects except with probability 1/p per slot.
-      for (uint32_t B = Bmin; B <= Bmax; ++B) {
-        const uint32_t k = B / mNumBatch;
-        const uint32_t j = B % mNumBatch;
-        if (k >= mWrap) {
-          continue;
-        }
-        mPrng.get<uint64_t>(padVec);
-        for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
-          padVec[bin] = seal::util::barrett_reduce_64(padVec[bin], mModulus);
-        }
-        mBatchEncoder->encode(
-            padVec, ptxts_diags[i][static_cast<size_t>(j) * mWrap + k]);
-      }
       continue;
     }
+
+    uint32_t Bmin = mLayerMinBlock[i];
+    uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
 
     layer_meta.clear();
 
@@ -601,10 +583,32 @@ void SspmtSender::encrypted_decode(
     uint32_t layerEnd) {
   decoded_in_he.resize(layerEnd - layerBegin);
 
+  std::vector<uint64_t> padVec(mNumSlots);
+  Plaintext padPtxt;
+
   for (uint32_t i = layerBegin; i < layerEnd; ++i) {
     bool initialized = false;
     Ciphertext tmp;
     Ciphertext &out = decoded_in_he[i - layerBegin];
+
+    // A padding layer's ciphertext only has to decrypt to something the
+    // receiver cannot predict: one received ciphertext times a dense random
+    // plaintext, plus the mask. A single multiply instead of a real layer's
+    // w + span chain -- the padding cost is compute-negligible. Its noise is
+    // therefore smaller than a real layer's; noise-level indistinguishability
+    // (which pre-flooding is broken anyway, since a real layer's noise scales
+    // with its occupancy) is the job of the upcoming noise-flooding step.
+    if (mLayerIsPadding[i]) {
+      mPrng.get<uint64_t>(padVec);
+      for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+        padVec[bin] = seal::util::barrett_reduce_64(padVec[bin], mModulus);
+      }
+      mBatchEncoder->encode(padVec, padPtxt);
+      mEvaluator->multiply_plain(encoded_in_he[0][0], padPtxt, out);
+      mEvaluator->add_plain_inplace(out, ptxts_mask[i]);
+      mEvaluator->mod_switch_to_next_inplace(out);
+      continue;
+    }
 
     const uint32_t Bmin = mLayerMinBlock[i];
     const uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
