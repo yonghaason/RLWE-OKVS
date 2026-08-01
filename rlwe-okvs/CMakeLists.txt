@@ -9,7 +9,6 @@ set(SRCS
     "GMW/Circuit.cpp"
     "GMW/Gmw.cpp"
     "GMW/SilentTripleGen.cpp"
-    "GMW/TripleGen.cpp"
     "pso.cpp"
 )
 
