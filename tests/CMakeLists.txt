@@ -1,6 +1,5 @@
 set(SRCS
 	OKVS_tests.cpp
-    RPMT_tests.cpp
     OPRF_tests.cpp
     CPSI_tests.cpp
     SSPMT_tests.cpp

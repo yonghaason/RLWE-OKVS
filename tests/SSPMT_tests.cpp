@@ -68,8 +68,6 @@ void sspmt_fulllayout_protocol_test(const oc::CLP& cmd)
     SspmtReceiver recver;
     sender.setTimer(timer_s);
     recver.setTimer(timer_r);
-    sender.fullLayoutOn();
-    recver.fullLayoutOn();
     sender.init(n, n, params, prng.get());
     recver.init(n, n, params, prng.get());
 

@@ -1,6 +1,8 @@
 #include "Circuit.h"
 #include <string>
 
+#include "cryptoTools/Circuit/BetaLibrary.h"
+
 using namespace oc;
 
 namespace volePSI
@@ -47,6 +49,38 @@ namespace volePSI
         cd.mOutputs.push_back(a);
 
         cd.levelByAndDepth();
+
+        return cd;
+    }
+
+    BetaCircuit sumThresholdCircuit(oc::u64 bits)
+    {
+        BetaCircuit cd;
+
+        BetaBundle a(bits), b(bits), t(bits), out(1);
+        cd.addInputBundle(a);
+        cd.addInputBundle(b);
+        cd.addInputBundle(t);
+        cd.addOutputBundle(out);
+
+        BetaBundle sum(bits);
+        cd.addTempWireBundle(sum);
+
+        // Depth-optimized adder needs no caller-provided temporaries
+        // (parallel prefix); lessThan allocates its own.
+        BetaBundle noTemps(0);
+        oc::BetaLibrary::add_build(cd, a, b, sum, noTemps,
+                                   oc::BetaLibrary::IntType::Unsigned,
+                                   oc::BetaLibrary::Optimized::Depth);
+        // Strict less-than with the operands swapped, rather than
+        // BetaLibrary's greaterThanEq_build: that one flips the result by
+        // setting the output wire's invert flag, and a flag on a terminal wire
+        // has no downstream gate to be folded into. The GMW backend evaluates
+        // gates only, so it would silently return the un-negated bit (whereas
+        // Circuit::evaluate honors the flag -- the two disagree).
+        oc::BetaLibrary::lessThan_build(cd, t, sum, out,
+                                        oc::BetaLibrary::IntType::Unsigned,
+                                        oc::BetaLibrary::Optimized::Depth);
 
         return cd;
     }

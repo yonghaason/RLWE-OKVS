@@ -1,6 +1,6 @@
 #include "SEQ_tests.h"
-#include "RPMT_tests.h"
-#include "rlwe-okvs/rpmt.h"
+#include "SEQ_tests.h"
+#include "rlwe-okvs/sspmt.h"
 #include "rlwe-okvs/sspmt.h"
 
 #include "cryptoTools/Common/Defines.h"
@@ -75,28 +75,27 @@ void sequencing_test(const oc::CLP& cmd)
     timer.setTimePoint("start");
 
     for (size_t r = 0; r < repeat; r++) {
-        RpmtSender rpmtSender;
-        rpmtParams ssParams;
+        sspmtParams ssParams;
         ssParams.initialize(n);
         ssParams.span_blocks = span_blocks;
         ssParams.bandExpansion = m_ratio;
         ssParams.bandWidth = w;
 
-        rpmtSender.init(n, n, ssParams, prng.get());
-        rpmtSender.sharedOutputOn();
+        const uint32_t N = ssParams.heNumSlots;
+        const uint32_t m = roundUpTo(ssParams.bandExpansion * n, N);
 
-        uint32_t m = ceil(ssParams.bandExpansion * n);
-
-        vector<uint32_t> start_pos(n);
+        vector<uint32_t> bins(n), blks(n);
         for (size_t i = 0; i < n; i++) {
-            start_pos[i] = prng.get<uint32_t>() % m;
+            uint32_t pos = prng.get<uint32_t>() % m;
+            bins[i] = pos % N;
+            blks[i] = pos / N;
         }
-      
-        rpmtSender.sequencing(start_pos);
 
-        span_avg += rpmtSender.getNumLayers();
+        vector<uint32_t> itemToLayer, layerMin, layerMax;
+        span_avg += sequenceLayers(bins, blks, N, span_blocks, itemToLayer,
+                                   layerMin, layerMax);
 
-        auto res = max_occupied_bin_modN(start_pos, ssParams.heNumSlots);
+        auto res = max_occupied_bin_modN(bins, N);
         maxbin_avg += res.max_load;
     }
     
