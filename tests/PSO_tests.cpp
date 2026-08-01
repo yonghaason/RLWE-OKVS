@@ -41,6 +41,9 @@ struct PsoFixture
     optional<macoro::thread_pool::work> e0, e1;
     array<coproto::LocalAsyncSocket, 2> socket;
     Timer timer_s, timer_r;
+    // Bytes on the wire when the offline phase ended, so the report can split
+    // setup from the online protocol.
+    u64 setupSent = 0, setupRecv = 0;
 
     PsoFixture(const oc::CLP& cmd)
         : prng(block(9871234, 1276353))
@@ -82,13 +85,23 @@ struct PsoFixture
     template <typename P0, typename P1>
     void runBoth(P0&& p0, P1&& p1)
     {
-        timer_s.setTimePoint("start");
-        timer_r.setTimePoint("start");
         auto r = macoro::sync_wait(macoro::when_all_ready(
             std::move(p0) | macoro::start_on(pool0),
             std::move(p1) | macoro::start_on(pool1)));
         std::get<0>(r).result();
         std::get<1>(r).result();
+    }
+
+    // Offline phase: the correlated randomness, which depends only on the
+    // public parameters. Run separately so its cost is attributed on its own.
+    template <typename S, typename R>
+    void runSetup(S& sender, R& receiver)
+    {
+        timer_s.setTimePoint("start");
+        timer_r.setTimePoint("start");
+        runBoth(sender.setup(socket[0]), receiver.setup(socket[1]));
+        setupSent = socket[0].bytesSent();
+        setupRecv = socket[1].bytesSent();
     }
 
     void report(const oc::CLP& cmd)
@@ -105,11 +118,15 @@ struct PsoFixture
         cout << "--------------------------" << endl;
         cout << timer_s << endl;
         cout << timer_r << endl;
-        cout << "comm " << double(socket[0].bytesSent()) / 1024 / 1024 << " + "
-             << double(socket[1].bytesSent()) / 1024 / 1024 << " = "
-             << double(socket[0].bytesSent() + socket[1].bytesSent()) / 1024 /
-                    1024
-             << "MB" << endl;
+        const double MB = 1024 * 1024;
+        const double offline = double(setupSent + setupRecv) / MB;
+        const double total = double(socket[0].bytesSent() +
+                                    socket[1].bytesSent()) / MB;
+        cout << "comm: offline " << offline << " MB + online "
+             << (total - offline) << " MB = " << total << " MB"
+             << "   (sender->receiver "
+             << double(socket[0].bytesSent()) / MB << ", receiver->sender "
+             << double(socket[1].bytesSent()) / MB << ")" << endl;
     }
 };
 
@@ -125,6 +142,8 @@ void psu_protocol_test(const oc::CLP& cmd)
     psuReceiver.setTimer(f.timer_r);
     psuSender.initWithParam(f.n, f.n, f.params, f.prng.get());
     psuReceiver.initWithParam(f.n, f.n, f.params, f.prng.get());
+
+    f.runSetup(psuSender, psuReceiver);
 
     vector<block> D;
     f.runBoth(psuSender.run(f.Y, f.socket[0]),
@@ -157,6 +176,8 @@ void psi_card_test(const oc::CLP& cmd)
     sender.initWithParam(f.n, f.n, f.params, f.prng.get());
     receiver.initWithParam(f.n, f.n, f.params, f.prng.get());
 
+    f.runSetup(sender, receiver);
+
     u64 cardinality = 0;
     f.runBoth(sender.run(f.Y, f.socket[0]),
               receiver.run(f.X, cardinality, f.socket[1]));
@@ -183,6 +204,8 @@ void psi_card_sum_test(const oc::CLP& cmd)
     receiver.setTimer(f.timer_r);
     sender.initWithParam(f.n, f.n, f.params, f.prng.get());
     receiver.initWithParam(f.n, f.n, f.params, f.prng.get());
+
+    f.runSetup(sender, receiver);
 
     u64 cardinality = 0, payloadSum = 0;
     f.runBoth(sender.run(f.Y, payloads, f.socket[0]),
@@ -230,6 +253,14 @@ void psi_threshold_test(const oc::CLP& cmd)
         receiver.initWithParam(f.n, f.n, f.params, f.prng.get());
 
         bool above = false;
+        auto s0 = sender.setup(socket[0]);
+        auto s1 = receiver.setup(socket[1]);
+        auto rs = macoro::sync_wait(macoro::when_all_ready(
+            std::move(s0) | macoro::start_on(f.pool0),
+            std::move(s1) | macoro::start_on(f.pool1)));
+        std::get<0>(rs).result();
+        std::get<1>(rs).result();
+
         auto p0 = sender.run(f.Y, t, socket[0]);
         auto p1 = receiver.run(f.X, t, above, socket[1]);
         auto r = macoro::sync_wait(macoro::when_all_ready(

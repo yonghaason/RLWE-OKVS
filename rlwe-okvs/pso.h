@@ -56,6 +56,8 @@ namespace rlweOkvs
             mSsParams.initialize(n);
             mPrng.SetSeed(seed);
         };
+
+        bool mSetupDone = false;
     };
 
     // Private set union. The sender transfers, per layout slot, either the
@@ -73,6 +75,10 @@ namespace rlweOkvs
         oc::SilentOtExtSender otSender;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& Y, Socket& chl);
     };
 
@@ -82,6 +88,10 @@ namespace rlweOkvs
         oc::SilentOtExtReceiver otReceiver;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& X,
             std::vector<oc::block>& D, Socket& chl);
     };
@@ -93,6 +103,10 @@ namespace rlweOkvs
         oc::SilentOtExtSender otSender;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& Y, Socket& chl);
     };
 
@@ -102,6 +116,10 @@ namespace rlweOkvs
         oc::SilentOtExtReceiver otReceiver;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& X,
             oc::u64& cardinality, Socket& chl);
     };
@@ -114,6 +132,10 @@ namespace rlweOkvs
         oc::SilentOtExtSender otSender;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& Y,
             const std::vector<oc::u32>& payloads, Socket& chl);
     };
@@ -124,6 +146,10 @@ namespace rlweOkvs
         oc::SilentOtExtReceiver otReceiver;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& X,
             oc::u64& cardinality, oc::u64& payloadSum, Socket& chl);
     };
@@ -136,6 +162,10 @@ namespace rlweOkvs
         oc::SilentOtExtSender otSender;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& Y, oc::u32 threshold,
             Socket& chl);
     };
@@ -146,6 +176,10 @@ namespace rlweOkvs
         oc::SilentOtExtReceiver otReceiver;
 
     public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
         Proto run(const std::vector<oc::block>& X, oc::u32 threshold,
             bool& aboveThreshold, Socket& chl);
     };

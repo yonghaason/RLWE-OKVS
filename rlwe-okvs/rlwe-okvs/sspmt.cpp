@@ -225,7 +225,6 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
               << mLayerBudget << " layer budget" << std::endl;
     throw RTE_LOC;
   }
-  mNumLayers = mLayerBudget;
 
   // The layout. Padding layers hold no item; their anchor is bookkeeping only.
   // They are left where the sequencer put them, in a suffix: the sequencer
@@ -284,7 +283,11 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mSpanBlocks = ssParams.span_blocks;
   mPrng.SetSeed(seed);
 
+  // The layout is fixed by the public parameters, not by the sequencing --
+  // the sender pads up to it. Setting the layer count here rather than in
+  // sequencing() is what lets setup() size the GMW before any input is known.
   mLayerBudget = ssParams.resolveLayerBudget(mN);
+  mNumLayers = mLayerBudget;
 
   mItemToBlockIdx.resize(mN);
   mItemToLayerIdx.resize(mN);
@@ -300,43 +303,46 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mEvaluator = make_unique<Evaluator>(*mContext);
 };
 
+void SspmtSender::initGmw() {
+  const u64 keyBitLength = 40 + oc::log2ceil(mN);
+  auto cir = isZeroCircuit(keyBitLength);
+  mGmw.setTimer(getTimer());
+  mGmw.init(getLayoutSize(), cir, 1, mOTeBatchSize, 0, mPrng.get());
+}
+
+Proto SspmtSender::setup(Socket &chl) {
+  if (mSetupDone) {
+    co_return;
+  }
+  initGmw();
+  co_await mGmw.generateTriple(chl);
+  mSetupDone = true;
+  setTimePoint("Sender::Setup (GMW triples)");
+}
+
 Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
                        Socket &chl) {
-  u64 keyBitLength = 40 + oc::log2ceil(Y.size());
-  u64 keyByteLength = oc::divCeil(keyBitLength, 8);
-  auto cir = isZeroCircuit(keyBitLength);
+  // The triples are input independent; if the offline phase was skipped they
+  // are generated here instead, before any input-dependent work starts.
+  co_await setup(chl);
 
-  // Overlap the (input-independent) GMW triple generation with the homomorphic
-  // decode. The layout size is public, so the GMW can be sized before
-  // preprocess; the triple generation then runs on a forked channel while the
-  // decode streams back on the base channel. This hides the decode under the
-  // triple generation and keeps the receiver busy instead of idle. Needs >=2
-  // executor threads per party to actually run in parallel (both stages are
-  // CPU-bound).
   preprocess(Y);
   vector<vector<Ciphertext>> encoded_in_he(mNumBatch);
   co_await recv_encoded_chunks(encoded_in_he, chl);
+  co_await send_decoded_chunks(encoded_in_he, chl);
 
   const u64 nInst = getLayoutSize();
-  Gmw gmw;
-  gmw.setTimer(getTimer());
-  gmw.init(nInst, cir, 1, mOTeBatchSize, 0, mPrng.get());
-
-  auto chlGmw = chl.fork();
-  auto he = send_decoded_chunks(encoded_in_he, chl);
-  auto tg = gmw.generateTriple(chlGmw);
-  auto both = co_await macoro::when_all_ready(std::move(he), std::move(tg));
-  std::get<0>(both).result();
-  std::get<1>(both).result();
+  const u64 keyBitLength = 40 + oc::log2ceil(mN);
+  const u64 keyByteLength = oc::divCeil(keyBitLength, 8);
 
   oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
   for (size_t i = 0; i < nInst; i++) {
     memcpy(&gmwin(i, 0), &mMasks[i], keyByteLength);
   }
-  gmw.setInput(0, gmwin);
-  co_await gmw.run(chl);  // triples already generated -> online only
+  mGmw.setInput(0, gmwin);
+  co_await mGmw.run(chl);  // triples already generated -> online only
 
-  auto rr = gmw.getOutputView(0);
+  auto rr = mGmw.getOutputView(0);
   results.resize(nInst);
   std::copy(rr.begin(), rr.end(), results.data());
   setTimePoint("Sender::Online GMW");
@@ -682,34 +688,38 @@ void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
   mDecryptor = make_unique<Decryptor>(*mContext, secret_key);
 };
 
+void SspmtReceiver::initGmw() {
+  const u64 keyBitLength = 40 + oc::log2ceil(mNsender);
+  auto cir = isZeroCircuit(keyBitLength);
+  mGmw.setTimer(getTimer());
+  mGmw.init(getLayoutSize(), cir, 1, mOTeBatchSize, 1, mPrng.get());
+}
+
+Proto SspmtReceiver::setup(Socket &chl) {
+  if (mSetupDone) {
+    co_return;
+  }
+  initGmw();
+  co_await mGmw.generateTriple(chl);
+  mSetupDone = true;
+  setTimePoint("Receiver::Setup (GMW triples)");
+}
+
 Proto SspmtReceiver::run(const std::vector<oc::block> &X,
                          oc::BitVector &results, Socket &chl) {
+  co_await setup(chl);
+
   co_await send_encoded_chunks(X, chl);
 
-  // The layout size is public, so the GMW is sized up front; the decoded
-  // ciphertexts then stream in on the base channel while the
-  // (input-independent) triples are generated on a forked channel, filling the
-  // idle wait for the sender's homomorphic decode. The equality runs over the
-  // whole L x H rectangle -- no occupancy is received -- so slot (layer i, bin
-  // b) matches iff the Y-item sitting there (if any) is in X; empty slots
-  // decode to 0 and never match.
+  // The equality runs over the whole L x H rectangle -- no occupancy is
+  // received -- so slot (layer i, bin b) matches iff the Y-item sitting there
+  // (if any) is in X; empty slots decode to 0 and never match.
   vector<Ciphertext> decoded_in_he;
+  co_await recv_decoded_chunks(decoded_in_he, chl);
+
   const size_t nInst = getLayoutSize();
-
-  u64 keyBitLength = 40 + oc::log2ceil(mNsender);
-  u64 keyByteLength = oc::divCeil(keyBitLength, 8);
-
-  Gmw gmw;
-  gmw.setTimer(getTimer());
-  auto cir = isZeroCircuit(keyBitLength);
-  gmw.init(nInst, cir, 1, mOTeBatchSize, 1, mPrng.get());
-
-  auto chlGmw = chl.fork();
-  auto he = recv_decoded_chunks(decoded_in_he, chl);
-  auto tg = gmw.generateTriple(chlGmw);
-  auto both = co_await macoro::when_all_ready(std::move(he), std::move(tg));
-  std::get<0>(both).result();
-  std::get<1>(both).result();
+  const u64 keyBitLength = 40 + oc::log2ceil(mNsender);
+  const u64 keyByteLength = oc::divCeil(keyBitLength, 8);
 
   oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
   vector<uint64_t> decodeVec(mNumSlots);
@@ -724,10 +734,10 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
   }
   setTimePoint("Receiver::Decrypt");
 
-  gmw.setInput(0, gmwin);
-  co_await gmw.run(chl);  // triples already generated -> online only
+  mGmw.setInput(0, gmwin);
+  co_await mGmw.run(chl);  // triples already generated -> online only
 
-  auto rr = gmw.getOutputView(0);
+  auto rr = mGmw.getOutputView(0);
   results.resize(nInst);
   std::copy(rr.begin(), rr.end(), results.data());
   setTimePoint("Receiver::Online GMW");

@@ -83,10 +83,20 @@ Proto weightedSumReceiver(SilentOtExtReceiver &ot, PRNG &prng, Socket &chl,
     }
 }
 
-Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
+Proto PsuSender::setup(Socket &chl)
 {
+    if (mSetupDone) {
+        co_return;
+    }
     sspmtSender.init(mN, mNother, mSsParams, mPrng.get());
     sspmtSender.setTimer(getTimer());
+    co_await sspmtSender.setup(chl);
+    mSetupDone = true;
+};
+
+Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
+{
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtSender.run(Y, sspmt, chl);
@@ -117,11 +127,21 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
     setTimePoint("Sender::Final OT PSU");
 };
 
+Proto PsuReceiver::setup(Socket &chl)
+{
+    if (mSetupDone) {
+        co_return;
+    }
+    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
+    sspmtReceiver.setTimer(getTimer());
+    co_await sspmtReceiver.setup(chl);
+    mSetupDone = true;
+};
+
 Proto PsuReceiver::run(const std::vector<oc::block> &X,
                        std::vector<oc::block> &D, Socket &chl)
 {
-    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
-    sspmtReceiver.setTimer(getTimer());
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtReceiver.run(X, sspmt, chl);
@@ -142,10 +162,20 @@ Proto PsuReceiver::run(const std::vector<oc::block> &X,
     setTimePoint("Receiver::Final OT PSU");
 };
 
-Proto PsiCardSender::run(const std::vector<oc::block> &Y, Socket &chl)
+Proto PsiCardSender::setup(Socket &chl)
 {
+    if (mSetupDone) {
+        co_return;
+    }
     sspmtSender.init(mN, mNother, mSsParams, mPrng.get());
     sspmtSender.setTimer(getTimer());
+    co_await sspmtSender.setup(chl);
+    mSetupDone = true;
+};
+
+Proto PsiCardSender::run(const std::vector<oc::block> &Y, Socket &chl)
+{
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtSender.run(Y, sspmt, chl);
@@ -165,11 +195,21 @@ Proto PsiCardSender::run(const std::vector<oc::block> &Y, Socket &chl)
     setTimePoint("Sender::Cardinality");
 };
 
+Proto PsiCardReceiver::setup(Socket &chl)
+{
+    if (mSetupDone) {
+        co_return;
+    }
+    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
+    sspmtReceiver.setTimer(getTimer());
+    co_await sspmtReceiver.setup(chl);
+    mSetupDone = true;
+};
+
 Proto PsiCardReceiver::run(const std::vector<oc::block> &X,
                            oc::u64 &cardinality, Socket &chl)
 {
-    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
-    sspmtReceiver.setTimer(getTimer());
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtReceiver.run(X, sspmt, chl);
@@ -184,6 +224,17 @@ Proto PsiCardReceiver::run(const std::vector<oc::block> &X,
     setTimePoint("Receiver::Cardinality");
 };
 
+Proto PsiCardSumSender::setup(Socket &chl)
+{
+    if (mSetupDone) {
+        co_return;
+    }
+    sspmtSender.init(mN, mNother, mSsParams, mPrng.get());
+    sspmtSender.setTimer(getTimer());
+    co_await sspmtSender.setup(chl);
+    mSetupDone = true;
+};
+
 Proto PsiCardSumSender::run(const std::vector<oc::block> &Y,
                             const std::vector<oc::u32> &payloads, Socket &chl)
 {
@@ -191,8 +242,7 @@ Proto PsiCardSumSender::run(const std::vector<oc::block> &Y,
         throw RTE_LOC;
     }
 
-    sspmtSender.init(mN, mNother, mSsParams, mPrng.get());
-    sspmtSender.setTimer(getTimer());
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtSender.run(Y, sspmt, chl);
@@ -222,12 +272,22 @@ Proto PsiCardSumSender::run(const std::vector<oc::block> &Y,
     setTimePoint("Sender::Card Sum");
 };
 
+Proto PsiCardSumReceiver::setup(Socket &chl)
+{
+    if (mSetupDone) {
+        co_return;
+    }
+    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
+    sspmtReceiver.setTimer(getTimer());
+    co_await sspmtReceiver.setup(chl);
+    mSetupDone = true;
+};
+
 Proto PsiCardSumReceiver::run(const std::vector<oc::block> &X,
                               oc::u64 &cardinality, oc::u64 &payloadSum,
                               Socket &chl)
 {
-    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
-    sspmtReceiver.setTimer(getTimer());
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtReceiver.run(X, sspmt, chl);
@@ -243,6 +303,17 @@ Proto PsiCardSumReceiver::run(const std::vector<oc::block> &X,
     setTimePoint("Receiver::Card Sum");
 };
 
+Proto PsiThresholdSender::setup(Socket &chl)
+{
+    if (mSetupDone) {
+        co_return;
+    }
+    sspmtSender.init(mN, mNother, mSsParams, mPrng.get());
+    sspmtSender.setTimer(getTimer());
+    co_await sspmtSender.setup(chl);
+    mSetupDone = true;
+};
+
 Proto PsiThresholdSender::run(const std::vector<oc::block> &Y, oc::u32 threshold,
                               Socket &chl)
 {
@@ -251,8 +322,7 @@ Proto PsiThresholdSender::run(const std::vector<oc::block> &Y, oc::u32 threshold
         throw RTE_LOC;
     }
 
-    sspmtSender.init(mN, mNother, mSsParams, mPrng.get());
-    sspmtSender.setTimer(getTimer());
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtSender.run(Y, sspmt, chl);
@@ -297,6 +367,17 @@ Proto PsiThresholdSender::run(const std::vector<oc::block> &Y, oc::u32 threshold
     setTimePoint("Sender::Threshold");
 };
 
+Proto PsiThresholdReceiver::setup(Socket &chl)
+{
+    if (mSetupDone) {
+        co_return;
+    }
+    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
+    sspmtReceiver.setTimer(getTimer());
+    co_await sspmtReceiver.setup(chl);
+    mSetupDone = true;
+};
+
 Proto PsiThresholdReceiver::run(const std::vector<oc::block> &X,
                                 oc::u32 threshold, bool &aboveThreshold,
                                 Socket &chl)
@@ -305,8 +386,7 @@ Proto PsiThresholdReceiver::run(const std::vector<oc::block> &X,
         throw RTE_LOC;
     }
 
-    sspmtReceiver.init(mN, mNother, mSsParams, mPrng.get());
-    sspmtReceiver.setTimer(getTimer());
+    co_await setup(chl);
 
     BitVector sspmt;
     co_await sspmtReceiver.run(X, sspmt, chl);

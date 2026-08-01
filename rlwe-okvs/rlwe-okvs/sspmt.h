@@ -9,6 +9,8 @@
 
 #include "seal/seal.h"
 
+#include "../GMW/Gmw.h"
+
 using namespace std;
 using namespace seal;
 using namespace oc;
@@ -130,7 +132,14 @@ namespace rlweOkvs
 
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
 
+        // The equality GMW. Its size is public (the layout is), so the
+        // correlated randomness it needs can be produced before either set is
+        // known -- see setup().
+        volePSI::Gmw mGmw;
+        bool mSetupDone = false;
         uint64_t mOTeBatchSize = 1ull << 19;
+
+        void initGmw();
 
     public:
         // Combinatorial core of the sequencing: partition items (bin, block)
@@ -159,6 +168,11 @@ namespace rlweOkvs
         void init(
             uint32_t n, uint32_t nReceiver,
             sspmtParams ssParams, oc::block seed = oc::OneBlock);
+
+        // Offline phase: generate the GMW triples. Depends only on the public
+        // parameters, so it can run at any point before run(); run() falls
+        // back to generating them inline if it was skipped.
+        Proto setup(Socket& chl);
 
         u32 getNumLayers() {return mNumLayers;};
         // Number of equality instances run: the whole L x H layout.
@@ -204,12 +218,19 @@ namespace rlweOkvs
 
         uint64_t mIndicatorStr;
 
+        volePSI::Gmw mGmw;
+        bool mSetupDone = false;
         uint64_t mOTeBatchSize = 1ull << 19;
+
+        void initGmw();
 
     public:
         void init(
             uint32_t n, uint32_t nSender,
             sspmtParams ssParams, oc::block seed = oc::ZeroBlock);
+
+        // Offline phase; see SspmtSender::setup().
+        Proto setup(Socket& chl);
 
         u32 getNumLayers() {return mLayerBudget;};
         u64 getLayoutSize() {return (u64)mLayerBudget * mNumSlots;};
