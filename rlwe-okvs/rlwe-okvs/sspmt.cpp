@@ -96,12 +96,12 @@ uint64_t totalEncodedCipherCount(uint32_t numBatch, uint32_t width,
 }
 }
 
-uint32_t sequenceLayers(const std::vector<uint32_t> &itemBin,
-                        const std::vector<uint32_t> &itemBlock,
-                        uint32_t numSlots, uint32_t spanBlocks,
-                        std::vector<uint32_t> &itemToLayer,
-                        std::vector<uint32_t> &layerMinBlock,
-                        std::vector<uint32_t> &layerMaxBlock) {
+uint32_t SspmtSender::sequenceLayers(const std::vector<uint32_t> &itemBin,
+                                     const std::vector<uint32_t> &itemBlock,
+                                     uint32_t numSlots, uint32_t spanBlocks,
+                                     std::vector<uint32_t> &itemToLayer,
+                                     std::vector<uint32_t> &layerMinBlock,
+                                     std::vector<uint32_t> &layerMaxBlock) {
   const uint32_t n = static_cast<uint32_t>(itemBin.size());
   itemToLayer.assign(n, UINT32_MAX);
   layerMinBlock.clear();
@@ -158,68 +158,23 @@ uint32_t sequenceLayers(const std::vector<uint32_t> &itemBin,
   return static_cast<uint32_t>(used_bins.size());
 }
 
-uint64_t sequencingLowerBound(const std::vector<uint32_t> &itemBin,
-                              const std::vector<uint32_t> &itemBlock,
-                              uint32_t numSlots, uint32_t spanBlocks) {
-  const uint32_t n = static_cast<uint32_t>(itemBin.size());
+u32 sspmtParams::resolveLayerBudget(u64 n) const {
+  if (layerBudget) {
+    return layerBudget;
+  }
   if (n == 0) {
     return 0;
   }
-  const uint32_t W = std::max<uint32_t>(spanBlocks, 1);
 
-  uint32_t b = 0;
-  for (uint32_t i = 0; i < n; ++i) {
-    b = std::max(b, itemBlock[i]);
-  }
-  b += 1;
-
-  std::vector<std::vector<uint32_t>> block_items(b);
-  for (uint32_t i = 0; i < n; ++i) {
-    block_items[itemBlock[i]].push_back(i);
-  }
-
-  // g[y] = best dual family value using intervals J = [x', y'] with y' <= y,
-  // where a family is admissible if the (clipped) extensions
-  // [max(0, x' - W + 1), y'] are pairwise disjoint. Taking J = [x, y] as the
-  // last interval forces the previous ones to end at or before x - W.
-  // Mrun[x] maintains M([x, y]) = max_bin |{items with bin, block in [x, y]}|
-  // as y sweeps; cnt[x][bin] are the per-interval bin counters.
-  std::vector<std::vector<uint32_t>> cnt(b,
-                                         std::vector<uint32_t>(numSlots, 0));
-  std::vector<uint32_t> Mrun(b, 0);
-  std::vector<uint64_t> g(b, 0);
-
-  for (uint32_t y = 0; y < b; ++y) {
-    for (uint32_t idx : block_items[y]) {
-      const uint32_t bin = itemBin[idx];
-      for (uint32_t x = 0; x <= y; ++x) {
-        const uint32_t c = ++cnt[x][bin];
-        if (c > Mrun[x]) {
-          Mrun[x] = c;
-        }
-      }
-    }
-    uint64_t best = (y > 0) ? g[y - 1] : 0;
-    for (uint32_t x = 0; x <= y; ++x) {
-      if (Mrun[x] == 0) {
-        continue;
-      }
-      const uint64_t pre = (x >= W) ? g[x - W] : 0;
-      best = std::max(best, pre + Mrun[x]);
-    }
-    g[y] = best;
-  }
-  return g[b - 1];
-}
-
-uint32_t certifiedLayerBudget(uint64_t n, uint32_t numSlots, uint32_t numBlocks,
-                              uint64_t positionRange, uint32_t spanBlocks,
-                              uint32_t lambda) {
-  if (n == 0 || numBlocks == 0) {
+  const uint32_t numSlots = heNumSlots;
+  const uint64_t m = roundUpTo(bandExpansion * n, numSlots);
+  const uint32_t b = (uint32_t)(m / numSlots);
+  const uint64_t positionRange = m - bandWidth + 1;
+  const uint32_t lambda = layerBudgetLambda;
+  const uint32_t W = std::max<uint32_t>(span_blocks, 1);
+  if (b == 0) {
     return 0;
   }
-  const uint32_t b = numBlocks;
-  const uint32_t W = std::max<uint32_t>(spanBlocks, 1);
 
   // One share of the 2^-lambda budget per (bin, start position, length)
   // Hall constraint.
@@ -264,7 +219,7 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
   // The realized layer count is a function of Y (its collision structure), so
   // it is padded up to the public budget before anything leaves this party.
   // Overflowing the budget is the 2^-lambda abort event of
-  // certifiedLayerBudget().
+  // sspmtParams::resolveLayerBudget().
   if (mNumRealLayers > mLayerBudget) {
     std::cout << "sequencing: " << mNumRealLayers << " layers exceed the "
               << mLayerBudget << " layer budget" << std::endl;
@@ -272,67 +227,27 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
   }
   mNumLayers = mLayerBudget;
 
-  mLayerBins.resize(mNumLayers);
-  for (uint32_t l = 0; l < mNumLayers; l++) {
-    mLayerBins[l].assign(mNumSlots, UINT32_MAX);
-  }
-
+  // The layout. Padding layers hold no item; their anchor is bookkeeping only.
+  // They are left where the sequencer put them, in a suffix: the sequencer
+  // front-loads each bin, so early layers are denser, but that is a prior the
+  // receiver can compute from the public parameters alone -- its view is
+  // uniform shares, with nothing in it that correlates with occupancy, so
+  // there is nothing for the prior to be applied to. (Where slot coordinates
+  // do become visible, as in the PSU transfer, permuting the layers would not
+  // be enough either; that needs the permute+share step noted in pso.h.)
+  mSlotToItem.assign(static_cast<size_t>(mNumLayers) * mNumSlots, UINT32_MAX);
   for (uint32_t i = 0; i < mN; ++i) {
-    mLayerBins[mItemToLayerIdx[i]][item_binidx[i]] = i;
+    mSlotToItem[static_cast<size_t>(mItemToLayerIdx[i]) * mNumSlots +
+                item_binidx[i]] = i;
   }
 
-  // Padding layers carry no item; each is anchored at a random block and
-  // filled with random diagonals in preprocess(), so its ciphertext costs and
-  // noise look like a real layer's.
   mLayerMinBlock.resize(mNumLayers);
   mLayerMaxBlock.resize(mNumLayers);
   mLayerIsPadding.assign(mNumLayers, 0);
-  const uint32_t lastBlock = mNumBatch - 1;
   for (uint32_t l = mNumRealLayers; l < mNumLayers; ++l) {
-    const uint32_t anchor = mPrng.get<uint32_t>() % mNumBatch;
-    mLayerMinBlock[l] = anchor;
-    mLayerMaxBlock[l] = std::min<uint32_t>(anchor + mSpanBlocks - 1, lastBlock);
+    mLayerMinBlock[l] = 0;
+    mLayerMaxBlock[l] = 0;
     mLayerIsPadding[l] = 1;
-  }
-
-  // Randomly permute the layers. The sequencer front-loads each bin (its
-  // occupied layers are essentially a prefix 0..k_b, since it always fills the
-  // earliest admissible layer) and the padding sits in a suffix, so without
-  // this the layer index carries a positional prior on occupancy. A single
-  // global permutation removes it: a prefix maps to a uniformly random subset
-  // of positions. All downstream state (diagonals, masks, sent ciphertexts)
-  // follows the permuted order, so correctness is untouched.
-  if (mNumLayers > 1) {
-    std::vector<uint32_t> perm(mNumLayers);
-    std::iota(perm.begin(), perm.end(), 0u);
-    for (uint32_t i = mNumLayers - 1; i > 0; --i) {
-      uint32_t j = mPrng.get<uint32_t>() % (i + 1);
-      std::swap(perm[i], perm[j]);
-    }
-    std::vector<uint32_t> invperm(mNumLayers);
-    for (uint32_t p = 0; p < mNumLayers; ++p) invperm[perm[p]] = p;
-
-    std::vector<std::vector<uint32_t>> permBins(mNumLayers);
-    std::vector<uint32_t> permMin(mNumLayers), permMax(mNumLayers);
-    std::vector<uint8_t> permPad(mNumLayers);
-    for (uint32_t p = 0; p < mNumLayers; ++p) {
-      permBins[p] = std::move(mLayerBins[perm[p]]);
-      permMin[p] = mLayerMinBlock[perm[p]];
-      permMax[p] = mLayerMaxBlock[perm[p]];
-      permPad[p] = mLayerIsPadding[perm[p]];
-    }
-    mLayerBins.swap(permBins);
-    mLayerMinBlock.swap(permMin);
-    mLayerMaxBlock.swap(permMax);
-    mLayerIsPadding.swap(permPad);
-    for (uint32_t i = 0; i < mN; ++i)
-      mItemToLayerIdx[i] = invperm[mItemToLayerIdx[i]];
-  }
-
-  mSlotToItem.resize(static_cast<size_t>(mNumLayers) * mNumSlots);
-  for (uint32_t lay = 0; lay < mNumLayers; ++lay) {
-    std::copy(mLayerBins[lay].begin(), mLayerBins[lay].end(),
-              mSlotToItem.begin() + static_cast<size_t>(lay) * mNumSlots);
   }
 
   // Every slot of the L x H layout -- occupied, empty or padding -- gets a
@@ -369,11 +284,7 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mSpanBlocks = ssParams.span_blocks;
   mPrng.SetSeed(seed);
 
-  mLayerBudget = ssParams.layerBudget
-                     ? ssParams.layerBudget
-                     : certifiedLayerBudget(mN, mNumSlots, mNumBatch,
-                                            mM - mW + 1, mSpanBlocks,
-                                            ssParams.layerBudgetLambda);
+  mLayerBudget = ssParams.resolveLayerBudget(mN);
 
   mItemToBlockIdx.resize(mN);
   mItemToLayerIdx.resize(mN);
@@ -490,7 +401,7 @@ void SspmtSender::preprocess(const std::vector<oc::block> &Y) {
     layer_meta.clear();
 
     for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
-      uint32_t item = mLayerBins[i][bin];
+      uint32_t item = mSlotToItem[static_cast<size_t>(i) * mNumSlots + bin];
       if (item == UINT32_MAX) {
         continue;
       }
@@ -750,11 +661,7 @@ void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
 
   // Same public formula as the sender's, over the sender's set size: both
   // parties must agree on the layout size without communicating it.
-  mLayerBudget = ssParams.layerBudget
-                     ? ssParams.layerBudget
-                     : certifiedLayerBudget(mNsender, mNumSlots, mNumBatch,
-                                            mM - mW + 1, ssParams.span_blocks,
-                                            ssParams.layerBudgetLambda);
+  mLayerBudget = ssParams.resolveLayerBudget(mNsender);
 
   parms.set_coeff_modulus(
       CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));

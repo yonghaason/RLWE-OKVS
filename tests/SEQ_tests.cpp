@@ -1,6 +1,4 @@
 #include "SEQ_tests.h"
-#include "SEQ_tests.h"
-#include "rlwe-okvs/sspmt.h"
 #include "rlwe-okvs/sspmt.h"
 
 #include "cryptoTools/Common/Defines.h"
@@ -54,6 +52,68 @@ MaxBinLoadResult max_occupied_bin_modN(const std::vector<uint32_t>& start_pos, u
 }
 
 
+// Exact lower bound on the achievable layer count, via the LP dual of the
+// sequencing problem: the maximum over families of block intervals J_1..J_K
+// whose spanBlocks-extensions are pairwise disjoint of sum_k (max per-bin item
+// count inside J_k). Every valid layer partition needs at least this many
+// layers -- each layer's anchor block lies in at most one extension -- so
+// equality with SspmtSender::sequenceLayers() certifies that both are optimal
+// for the given instance. Test-only: the protocol never needs the bound, only
+// the algorithm it certifies.
+static uint64_t sequencingLowerBound(const std::vector<uint32_t> &itemBin,
+                              const std::vector<uint32_t> &itemBlock,
+                              uint32_t numSlots, uint32_t spanBlocks) {
+  const uint32_t n = static_cast<uint32_t>(itemBin.size());
+  if (n == 0) {
+    return 0;
+  }
+  const uint32_t W = std::max<uint32_t>(spanBlocks, 1);
+
+  uint32_t b = 0;
+  for (uint32_t i = 0; i < n; ++i) {
+    b = std::max(b, itemBlock[i]);
+  }
+  b += 1;
+
+  std::vector<std::vector<uint32_t>> block_items(b);
+  for (uint32_t i = 0; i < n; ++i) {
+    block_items[itemBlock[i]].push_back(i);
+  }
+
+  // g[y] = best dual family value using intervals J = [x', y'] with y' <= y,
+  // where a family is admissible if the (clipped) extensions
+  // [max(0, x' - W + 1), y'] are pairwise disjoint. Taking J = [x, y] as the
+  // last interval forces the previous ones to end at or before x - W.
+  // Mrun[x] maintains M([x, y]) = max_bin |{items with bin, block in [x, y]}|
+  // as y sweeps; cnt[x][bin] are the per-interval bin counters.
+  std::vector<std::vector<uint32_t>> cnt(b,
+                                         std::vector<uint32_t>(numSlots, 0));
+  std::vector<uint32_t> Mrun(b, 0);
+  std::vector<uint64_t> g(b, 0);
+
+  for (uint32_t y = 0; y < b; ++y) {
+    for (uint32_t idx : block_items[y]) {
+      const uint32_t bin = itemBin[idx];
+      for (uint32_t x = 0; x <= y; ++x) {
+        const uint32_t c = ++cnt[x][bin];
+        if (c > Mrun[x]) {
+          Mrun[x] = c;
+        }
+      }
+    }
+    uint64_t best = (y > 0) ? g[y - 1] : 0;
+    for (uint32_t x = 0; x <= y; ++x) {
+      if (Mrun[x] == 0) {
+        continue;
+      }
+      const uint64_t pre = (x >= W) ? g[x - W] : 0;
+      best = std::max(best, pre + Mrun[x]);
+    }
+    g[y] = best;
+  }
+  return g[b - 1];
+}
+
 void sequencing_test(const oc::CLP& cmd)
 {
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
@@ -92,8 +152,8 @@ void sequencing_test(const oc::CLP& cmd)
         }
 
         vector<uint32_t> itemToLayer, layerMin, layerMax;
-        span_avg += sequenceLayers(bins, blks, N, span_blocks, itemToLayer,
-                                   layerMin, layerMax);
+        span_avg += SspmtSender::sequenceLayers(bins, blks, N, span_blocks,
+                                               itemToLayer, layerMin, layerMax);
 
         auto res = max_occupied_bin_modN(bins, N);
         maxbin_avg += res.max_load;
@@ -135,8 +195,8 @@ void opti_sequencing_test(const oc::CLP& cmd)
         }
 
         std::vector<uint32_t> itemToLayer, layerMin, layerMax;
-        uint64_t L = sequenceLayers(bins, blks, N, W, itemToLayer, layerMin,
-                                    layerMax);
+        uint64_t L = SspmtSender::sequenceLayers(bins, blks, N, W, itemToLayer,
+                                                 layerMin, layerMax);
         uint64_t LB = sequencingLowerBound(bins, blks, N, W);
 
         // Feasibility of the produced partition (span + one item per bin).
@@ -181,8 +241,8 @@ void opti_sequencing_test(const oc::CLP& cmd)
         }
 
         std::vector<uint32_t> itemToLayer, layerMin, layerMax;
-        uint64_t L = sequenceLayers(bins, blks, N, W, itemToLayer, layerMin,
-                                    layerMax);
+        uint64_t L = SspmtSender::sequenceLayers(bins, blks, N, W, itemToLayer,
+                                                 layerMin, layerMax);
         uint64_t LB = sequencingLowerBound(bins, blks, N, W);
 
         uint32_t maxload = 0;

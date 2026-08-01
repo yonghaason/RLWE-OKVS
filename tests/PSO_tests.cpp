@@ -100,10 +100,7 @@ struct PsoFixture
         cout << "n: " << n << ", intersection: " << inter << endl;
         cout << "w: " << params.bandWidth << ", m/n: " << params.bandExpansion
              << ", seq_span: " << params.span_blocks << endl;
-        cout << "layer budget: "
-             << certifiedLayerBudget(n, numslots, m / numslots,
-                                     m - params.bandWidth + 1,
-                                     params.span_blocks)
+        cout << "layer budget: " << params.resolveLayerBudget(n)
              << " (blocks b = " << m / numslots << ")" << endl;
         cout << "--------------------------" << endl;
         cout << timer_s << endl;

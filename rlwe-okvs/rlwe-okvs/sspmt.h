@@ -25,15 +25,34 @@ namespace rlweOkvs
         u32 bandWidth;
         u32 span_blocks;
         double bandExpansion;
-        // Number of layers actually transmitted. It is a public function of
-        // (n, heNumSlots, m, span_blocks) and must not depend on the sender's
-        // set: the realized layer count does, so sending it would leak. Left
-        // at 0 the parties derive the certified budget of
-        // certifiedLayerBudget() at init; set it explicitly only to explore
-        // the (uncertified) empirical regime.
+        // Number of layers actually transmitted; see resolveLayerBudget().
+        // Left at 0 the parties derive the certified budget at init; set it
+        // explicitly only to explore the (uncertified) empirical regime.
         u32 layerBudget = 0;
         // Statistical security parameter for the layer budget.
         u32 layerBudgetLambda = 40;
+
+        // The number of layers to transmit for a sender set of size n: the
+        // explicit layerBudget when set, otherwise a count that the optimal
+        // sequencing of n uniformly placed items fits into except with
+        // probability at most 2^-layerBudgetLambda. It is a function of the
+        // public parameters alone, so both parties derive the same value
+        // without communicating -- the realized layer count depends on the
+        // sender's set, so sending that would leak.
+        //
+        // Derivation. A layer is a window of span_blocks consecutive blocks
+        // with capacity one per bin, so a multiset of window starts admits all
+        // items iff Hall's condition holds for every block interval J of
+        // length g: the windows overlapping J must number at least the largest
+        // per-bin item count inside J. Laying windows down at a uniform
+        // density rho satisfies every constraint once
+        // rho*(g+span_blocks) - 1 >= D(g) for all g, where D(g) bounds that
+        // per-bin count. D(g) is the exact upper binomial quantile of
+        // Bin(n, g/positionRange) at the union-adjusted level
+        // 2^-lambda / (heNumSlots * b^2) -- one budget share per (bin,
+        // position, length) constraint -- and the window count is then
+        // ceil(rho * (b + span_blocks)).
+        u32 resolveLayerBudget(u64 n) const;
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
@@ -75,57 +94,6 @@ namespace rlweOkvs
         }
     };
 
-    // Combinatorial core of the layer sequencing: partition items (bin, block)
-    // into layers such that each layer holds at most one item per bin and the
-    // occupied blocks of a layer span at most spanBlocks consecutive blocks.
-    // Processes blocks left to right, assigns each item to the compatible
-    // layer with the smallest anchor block (earliest-expiring first), and
-    // opens a new layer anchored at the current block when none fits. This is
-    // exactly the optimal algorithm for the underlying interval-covering LP;
-    // sequencingLowerBound() certifies per-instance optimality.
-    // Returns the layer count and fills itemToLayer / layerMinBlock /
-    // layerMaxBlock (resized internally).
-    uint32_t sequenceLayers(
-        const std::vector<uint32_t> &itemBin,
-        const std::vector<uint32_t> &itemBlock,
-        uint32_t numSlots, uint32_t spanBlocks,
-        std::vector<uint32_t> &itemToLayer,
-        std::vector<uint32_t> &layerMinBlock,
-        std::vector<uint32_t> &layerMaxBlock);
-
-    // Exact lower bound on the achievable layer count, via the LP dual of the
-    // sequencing problem: the maximum over families of block intervals
-    // J_1..J_K whose spanBlocks-extensions are pairwise disjoint of
-    // sum_k (max per-bin item count inside J_k). Every valid layer partition
-    // needs at least this many layers (each layer's anchor block lies in at
-    // most one extension), so sequenceLayers(...) == sequencingLowerBound(...)
-    // certifies that both are optimal for the given instance.
-    uint64_t sequencingLowerBound(
-        const std::vector<uint32_t> &itemBin,
-        const std::vector<uint32_t> &itemBlock,
-        uint32_t numSlots, uint32_t spanBlocks);
-
-    // Public layer budget: a number of layers that the optimal sequencing of
-    // n uniformly placed items fits into, except with probability at most
-    // 2^-lambda. The protocol always transmits exactly this many layers (real
-    // ones plus padding), so the realized layer count -- a function of the
-    // sender's set -- never reaches the receiver.
-    //
-    // Derivation. A layer is a window of spanBlocks consecutive blocks with
-    // capacity one per bin, so a multiset of window starts admits all items
-    // iff Hall's condition holds for every block interval J of length g:
-    // the windows overlapping J must number at least the largest per-bin item
-    // count inside J. Laying windows down at a uniform density rho satisfies
-    // every constraint once rho*(g+spanBlocks) - 1 >= D(g) for all g, where
-    // D(g) bounds that per-bin count. D(g) is the exact upper binomial
-    // quantile of Bin(n, g/positionRange) at the union-adjusted level
-    // 2^-lambda / (numSlots * b^2) -- one budget share per (bin, position,
-    // length) constraint -- and the resulting window count is
-    // ceil(rho * (b + spanBlocks)).
-    uint32_t certifiedLayerBudget(
-        uint64_t n, uint32_t numSlots, uint32_t numBlocks,
-        uint64_t positionRange, uint32_t spanBlocks, uint32_t lambda = 40);
-
     class SspmtSender: public oc::TimerAdapter
     {
 
@@ -143,14 +111,14 @@ namespace rlweOkvs
         uint32_t mSpanBlocks;
         std::vector<uint32_t> mItemToLayerIdx;
         std::vector<uint32_t> mItemToBlockIdx;
-        std::vector<std::vector<uint32_t>> mLayerBins;
         std::vector<uint32_t> mLayerMinBlock;
         std::vector<uint32_t> mLayerMaxBlock;
         std::vector<uint8_t> mLayerIsPadding;
 
-        // Slot -> item index of the item sitting there, UINT32_MAX if empty,
-        // in layer-major order. Lets the OT-based extensions (PSU, card-sum)
-        // address the sender's payloads by slot.
+        // The layout itself: slot -> index of the item sitting there,
+        // UINT32_MAX if empty, layer-major (slot = layer * mNumSlots + bin).
+        // Also what the OT-based extensions (PSU, card-sum) use to address the
+        // sender's payloads by slot.
         std::vector<uint32_t> mSlotToItem;
         // One mask per slot, layer-major: mask[lay * mNumSlots + bin]. The
         // equality runs over every slot of the L x H layout, so the occupancy
@@ -165,6 +133,27 @@ namespace rlweOkvs
         uint64_t mOTeBatchSize = 1ull << 19;
 
     public:
+        // Combinatorial core of the sequencing: partition items (bin, block)
+        // into layers such that each layer holds at most one item per bin and
+        // the occupied blocks of a layer span at most spanBlocks consecutive
+        // blocks. Processes blocks left to right, assigns each item to the
+        // compatible layer with the smallest anchor block (earliest-expiring
+        // first), and opens a new layer anchored at the current block when
+        // none fits. This attains the optimum of the underlying
+        // interval-covering LP, which Sequencing_opt_test certifies per
+        // instance against the LP dual. Returns the layer count and fills
+        // itemToLayer / layerMinBlock / layerMaxBlock (resized internally).
+        // Static so it can be exercised on its own, without HE state.
+        static uint32_t sequenceLayers(
+            const std::vector<uint32_t>& itemBin,
+            const std::vector<uint32_t>& itemBlock,
+            uint32_t numSlots, uint32_t spanBlocks,
+            std::vector<uint32_t>& itemToLayer,
+            std::vector<uint32_t>& layerMinBlock,
+            std::vector<uint32_t>& layerMaxBlock);
+
+        // Runs sequenceLayers on the band start positions, then pads the
+        // result out to the public layer budget and builds the layout.
         void sequencing(const std::vector<uint32_t>& start_pos_spacing);
 
         void init(
