@@ -67,81 +67,133 @@ uint64_t totalEncodedCipherCount(uint32_t numBatch, uint32_t width,
 }
 }
 
-void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
-  std::vector<uint32_t> item_binidx(mN);
+uint32_t sequenceLayers(const std::vector<uint32_t> &itemBin,
+                        const std::vector<uint32_t> &itemBlock,
+                        uint32_t numSlots, uint32_t spanBlocks,
+                        std::vector<uint32_t> &itemToLayer,
+                        std::vector<uint32_t> &layerMinBlock,
+                        std::vector<uint32_t> &layerMaxBlock) {
+  const uint32_t n = static_cast<uint32_t>(itemBin.size());
+  itemToLayer.assign(n, UINT32_MAX);
+  layerMinBlock.clear();
+  layerMaxBlock.clear();
+  if (n == 0) {
+    return 0;
+  }
+
   uint32_t max_block = 0;
-
-  for (uint32_t i = 0; i < mN; ++i) {
-    uint32_t pos = start_pos_spacing[i];
-    uint32_t bin = pos % mNumSlots;
-    uint32_t blk = pos / mNumSlots;
-
-    item_binidx[i] = bin;
-    mItemToBlockIdx[i] = blk;
-    if (blk > max_block) max_block = blk;
+  for (uint32_t i = 0; i < n; ++i) {
+    max_block = std::max(max_block, itemBlock[i]);
   }
 
   std::vector<std::vector<uint32_t>> block_items(max_block + 1);
-  for (uint32_t i = 0; i < mN; ++i) {
-    block_items[mItemToBlockIdx[i]].push_back(i);
+  for (uint32_t i = 0; i < n; ++i) {
+    block_items[itemBlock[i]].push_back(i);
   }
 
-  struct Layer {
-    uint32_t min_block;
-    uint32_t max_block;
-    std::vector<uint8_t> used_bins;
-  };
-  std::vector<Layer> layers;
+  // Blocks are processed left to right, so a layer's min block is fixed at
+  // creation and span admissibility is purely "min_block + spanBlocks > blk".
+  // Layers are created with nondecreasing min block; the admissible ones form
+  // a suffix [firstActive, end), and scanning it in order is exactly
+  // "smallest anchor first" (earliest-expiring first).
+  std::vector<std::vector<uint8_t>> used_bins;
+  uint32_t firstActive = 0;
 
   for (uint32_t blk = 0; blk <= max_block; ++blk) {
-    auto &bucket = block_items[blk];
-    for (uint32_t idx : bucket) {
-      uint32_t r = item_binidx[idx];      // bin (residue)
-      uint32_t j = mItemToBlockIdx[idx];  // block
+    while (firstActive < layerMinBlock.size() &&
+           layerMinBlock[firstActive] + spanBlocks <= blk) {
+      ++firstActive;
+    }
+    for (uint32_t idx : block_items[blk]) {
+      const uint32_t r = itemBin[idx];
       bool placed = false;
-      for (uint32_t li = 0; li < layers.size(); ++li) {
-        Layer &L = layers[li];
-
-        if (L.used_bins[r]) {
+      for (uint32_t li = firstActive; li < used_bins.size(); ++li) {
+        if (used_bins[li][r]) {
           continue;
         }
-
-        uint32_t new_min = std::min(L.min_block, j);
-        uint32_t new_max = std::max(L.max_block, j);
-        uint32_t span = new_max - new_min + 1;
-
-        if (span <= mSpanBlocks) {
-          if (L.used_bins.empty()) {
-            L.used_bins.assign(mNumSlots, 0);
-          }
-          L.used_bins[r] = 1;
-          L.min_block = new_min;
-          L.max_block = new_max;
-          mItemToLayerIdx[idx] = li;
-          placed = true;
-          break;
-        }
+        used_bins[li][r] = 1;
+        layerMaxBlock[li] = blk;
+        itemToLayer[idx] = li;
+        placed = true;
+        break;
       }
-
       if (!placed) {
-        Layer nl;
-        nl.min_block = j;
-        nl.max_block = j;
-        nl.used_bins.assign(mNumSlots, 0);
-        nl.used_bins[r] = 1;
-        layers.push_back(std::move(nl));
-        mItemToLayerIdx[idx] = layers.size() - 1;
+        used_bins.emplace_back(numSlots, 0);
+        used_bins.back()[r] = 1;
+        layerMinBlock.push_back(blk);
+        layerMaxBlock.push_back(blk);
+        itemToLayer[idx] = static_cast<uint32_t>(used_bins.size()) - 1;
       }
     }
   }
+  return static_cast<uint32_t>(used_bins.size());
+}
 
-  mNumLayers = layers.size();
-  mLayerMinBlock.resize(mNumLayers);
-  mLayerMaxBlock.resize(mNumLayers);
-  for (uint32_t l = 0; l < mNumLayers; ++l) {
-    mLayerMinBlock[l] = layers[l].min_block;
-    mLayerMaxBlock[l] = layers[l].max_block;
+uint64_t sequencingLowerBound(const std::vector<uint32_t> &itemBin,
+                              const std::vector<uint32_t> &itemBlock,
+                              uint32_t numSlots, uint32_t spanBlocks) {
+  const uint32_t n = static_cast<uint32_t>(itemBin.size());
+  if (n == 0) {
+    return 0;
   }
+  const uint32_t W = std::max<uint32_t>(spanBlocks, 1);
+
+  uint32_t b = 0;
+  for (uint32_t i = 0; i < n; ++i) {
+    b = std::max(b, itemBlock[i]);
+  }
+  b += 1;
+
+  std::vector<std::vector<uint32_t>> block_items(b);
+  for (uint32_t i = 0; i < n; ++i) {
+    block_items[itemBlock[i]].push_back(i);
+  }
+
+  // g[y] = best dual family value using intervals J = [x', y'] with y' <= y,
+  // where a family is admissible if the (clipped) extensions
+  // [max(0, x' - W + 1), y'] are pairwise disjoint. Taking J = [x, y] as the
+  // last interval forces the previous ones to end at or before x - W.
+  // Mrun[x] maintains M([x, y]) = max_bin |{items with bin, block in [x, y]}|
+  // as y sweeps; cnt[x][bin] are the per-interval bin counters.
+  std::vector<std::vector<uint32_t>> cnt(b,
+                                         std::vector<uint32_t>(numSlots, 0));
+  std::vector<uint32_t> Mrun(b, 0);
+  std::vector<uint64_t> g(b, 0);
+
+  for (uint32_t y = 0; y < b; ++y) {
+    for (uint32_t idx : block_items[y]) {
+      const uint32_t bin = itemBin[idx];
+      for (uint32_t x = 0; x <= y; ++x) {
+        const uint32_t c = ++cnt[x][bin];
+        if (c > Mrun[x]) {
+          Mrun[x] = c;
+        }
+      }
+    }
+    uint64_t best = (y > 0) ? g[y - 1] : 0;
+    for (uint32_t x = 0; x <= y; ++x) {
+      if (Mrun[x] == 0) {
+        continue;
+      }
+      const uint64_t pre = (x >= W) ? g[x - W] : 0;
+      best = std::max(best, pre + Mrun[x]);
+    }
+    g[y] = best;
+  }
+  return g[b - 1];
+}
+
+void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
+  std::vector<uint32_t> item_binidx(mN);
+  for (uint32_t i = 0; i < mN; ++i) {
+    uint32_t pos = start_pos_spacing[i];
+    item_binidx[i] = pos % mNumSlots;
+    mItemToBlockIdx[i] = pos / mNumSlots;
+  }
+
+  mNumLayers = sequenceLayers(item_binidx, mItemToBlockIdx, mNumSlots,
+                              mSpanBlocks, mItemToLayerIdx, mLayerMinBlock,
+                              mLayerMaxBlock);
 
   std::vector<std::vector<uint32_t>> bin_layers(mNumSlots);
   mLayerBins.resize(mNumLayers);

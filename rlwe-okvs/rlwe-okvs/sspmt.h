@@ -65,6 +65,36 @@ namespace rlweOkvs
         }
     };
 
+    // Combinatorial core of the layer sequencing: partition items (bin, block)
+    // into layers such that each layer holds at most one item per bin and the
+    // occupied blocks of a layer span at most spanBlocks consecutive blocks.
+    // Processes blocks left to right, assigns each item to the compatible
+    // layer with the smallest anchor block (earliest-expiring first), and
+    // opens a new layer anchored at the current block when none fits. This is
+    // exactly the optimal algorithm for the underlying interval-covering LP;
+    // sequencingLowerBound() certifies per-instance optimality.
+    // Returns the layer count and fills itemToLayer / layerMinBlock /
+    // layerMaxBlock (resized internally).
+    uint32_t sequenceLayers(
+        const std::vector<uint32_t> &itemBin,
+        const std::vector<uint32_t> &itemBlock,
+        uint32_t numSlots, uint32_t spanBlocks,
+        std::vector<uint32_t> &itemToLayer,
+        std::vector<uint32_t> &layerMinBlock,
+        std::vector<uint32_t> &layerMaxBlock);
+
+    // Exact lower bound on the achievable layer count, via the LP dual of the
+    // sequencing problem: the maximum over families of block intervals
+    // J_1..J_K whose spanBlocks-extensions are pairwise disjoint of
+    // sum_k (max per-bin item count inside J_k). Every valid layer partition
+    // needs at least this many layers (each layer's anchor block lies in at
+    // most one extension), so sequenceLayers(...) == sequencingLowerBound(...)
+    // certifies that both are optimal for the given instance.
+    uint64_t sequencingLowerBound(
+        const std::vector<uint32_t> &itemBin,
+        const std::vector<uint32_t> &itemBlock,
+        uint32_t numSlots, uint32_t spanBlocks);
+
     class SspmtSender: public oc::TimerAdapter
     {
         
