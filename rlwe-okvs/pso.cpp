@@ -159,6 +159,9 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
         for (u64 s = 0; s < nSlots; ++s)
             if (!used[s]) perm[next++] = (int)s;
     }
+    // Keep the slots our own items landed in; the permutation itself is moved
+    // into the Benes routing and getPerm() would hand back a full copy.
+    std::vector<uint32_t> itemSlots(perm.begin(), perm.begin() + mN);
     psSender.setPermutation(std::move(perm));
 
     // After this, share[j] ^ (receiver's share)[j] is the membership bit of
@@ -170,7 +173,7 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
     // the membership bits themselves, in item order.
     BitVector bits(mN);
     for (u64 j = 0; j < mN; ++j) {
-        bits[j] = psShare[j] ^ sspmt[psSender.getPerm()[j]];
+        bits[j] = psShare[j] ^ sspmt[itemSlots[j]];
     }
 
     BitVector flip(mN);
