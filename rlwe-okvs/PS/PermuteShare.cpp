@@ -312,7 +312,11 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
       return;
     }
 
-    // partea superioara
+    // partea superioara. The receiver's masks do not swap -- it does not know
+    // the switch settings -- so the split is already branchless; presizing
+    // just avoids the pushBack bookkeeping.
+    bottom1.resize(subNetSize / 2);
+    top1.resize(subNetSize / 2 + (subNetSize % 2));
     for (int i = 0; i < subNetSize - 1; i += 2)
     {
       baseIdx = (depth) * (mN / 2) + permIdx + i / 2;
@@ -326,13 +330,13 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
       src[i] = w0;
       src[i ^ 1] = w1;
 
-      bottom1.pushBack(src[i]);
-      top1.pushBack(src[i ^ 1]);
+      bottom1[i / 2] = (u8)src[i];
+      top1[i / 2] = (u8)src[i ^ 1];
     }
 
     if (subNetSize % 2 == 1)
     {
-      top1.pushBack(src[subNetSize - 1]);
+      top1[subNetSize / 2] = (u8)src[subNetSize - 1];
     }
 
     prepareCorrection(depth + 1, permIdx + subNetSize / 4, top1, otMsgs, corrections);

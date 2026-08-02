@@ -194,37 +194,33 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 	 * 2 pentru partea inferioara
 	 */
 	// partea superioara
+	//
+	// shuffle((i|j) ^ s, coDepth) = ((j ^ s) << (coDepth-1)) | (i/2), and the
+	// invariant subNetSize <= 2^coDepth (which holds at the root and is
+	// preserved, including for odd sizes) makes "< subNetSize/2" exactly
+	// "j == s". So the wire that goes down is src[i + s] and the one that goes
+	// up is src[i + 1 - s] -- no data-dependent branch, and both halves grow
+	// by one per switch.
+	bottom1.resize(subNetSize / 2);
+	top1.resize(subNetSize / 2 + (subNetSize % 2));
 	for (i = 0; i < subNetSize - 1; i += 2)
 	{
-		mSwitches[depth][permIdx + i / 2] = path[i];
-		for (j = 0; j < 2; ++j)
-		{
-			x = shuffle((i | j) ^ path[i], coDepth);
-			if (x < subNetSize / 2)
-				bottom1.push_back(src[i | j]);
-			else
-				top1.push_back(src[i | j]);
-		}
+		s = path[i];
+		mSwitches[depth][permIdx + i / 2] = s;
+		bottom1[i / 2] = src[i + s];
+		top1[i / 2] = src[i + 1 - s];
 	}
 	if (subNetSize % 2 == 1)
 	{
-		top1.push_back(src[subNetSize - 1]);
+		top1[subNetSize / 2] = src[subNetSize - 1];
 	}
 
 	// partea inferioara
 	for (i = 0; i < subNetSize - 1; i += 2)
 	{
 		s = mSwitches[depth + levels - 1][permIdx + i / 2] = path[permInner[i]];
-		for (j = 0; j < 2; ++j)
-		{
-			x = shuffle((i | j) ^ s, coDepth);
-			if (x < subNetSize / 2)
-				bottom2[x] = src[permInner[i | j]];
-			else
-			{
-				top2[i / 2] = src[permInner[i | j]];
-			}
-		}
+		bottom2[i / 2] = src[permInner[i + s]];
+		top2[i / 2] = src[permInner[i + 1 - s]];
 	}
 
 	int idx = int(ceil(subNetSize * 0.5));
@@ -447,32 +443,21 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 
 	levels = 2 * coDepth - 1;
 
-	// partea superioara
+	// partea superioara -- see the routing for why the split is branchless.
+	bottom1.resize(subNetSize / 2);
+	top1.resize(subNetSize / 2 + (subNetSize % 2));
 	for (i = 0; i < subNetSize - 1; i += 2)
 	{
-		int s = mSwitches[depth][permIdx + i / 2];
-
+		s = mSwitches[depth][permIdx + i / 2];
 		temp_int = otMsgs[(depth) * (mN / 2) + (permIdx + i / 2)];
-
 		src[i] = src[i] ^ temp_int;
-		src[i ^ 1] = src[i ^ 1] ^ temp_int; //  ^ or | ??
-
-		for (j = 0; j < 2; ++j)
-		{
-			x = shuffle((i | j) ^ s, coDepth);
-			if (x < subNetSize / 2)
-			{
-				bottom1.pushBack(src[i | j]);
-			}
-			else
-			{
-				top1.pushBack(src[i | j]);
-			}
-		}
+		src[i ^ 1] = src[i ^ 1] ^ temp_int;
+		bottom1[i / 2] = (oc::u8)src[i + s];
+		top1[i / 2] = (oc::u8)src[i + 1 - s];
 	}
 	if (subNetSize % 2 == 1)
 	{
-		top1.pushBack(src[subNetSize - 1]);
+		top1[subNetSize / 2] = (oc::u8)src[subNetSize - 1];
 	}
 
 	benesMaskedEval(bottom1, otMsgs, depth + 1, permIdx);
@@ -482,16 +467,8 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 	{
 		s = mSwitches[depth + levels - 1][permIdx + i / 2];
 
-		for (j = 0; j < 2; ++j)
-		{
-			x = shuffle((i | j) ^ s, coDepth);
-			if (x < subNetSize / 2)
-				src[i | j] = bottom1[x];
-			else
-			{
-				src[i | j] = top1[i / 2];
-			}
-		}
+		src[i + s] = (oc::u8)bottom1[i / 2];
+		src[i + 1 - s] = (oc::u8)top1[i / 2];
 
 		temp_int = otMsgs[(depth + levels - 1) * (mN / 2) + (permIdx + i / 2)];
 		src[i] = src[i] ^ temp_int;
