@@ -1,0 +1,233 @@
+% ===========================================================================
+% Sequencing: the layer-count minimization, its min--max theorem, and the
+% public layer budget used to pad the layout.
+%
+% Self-contained section; drop \input{sequencing-note} into the paper (needs
+% amsmath, amssymb and a theorem environment -- llncs provides \begin{theorem}
+% etc., so nothing else is required).
+%
+% Notation used here matches the implementation:
+%   N   RLWE slot count (rows / bins)
+%   b   number of blocks, m = b*N the OKVS length
+%   z   span parameter (span_blocks): a layer covers z consecutive blocks
+%   n   sender set size
+% ===========================================================================
+
+\section{Sequencing and the Layer Budget}
+\label{sec:sequencing}
+
+\subsection{The combinatorial problem}
+
+After the column permutation, the $i$-th sender item occupies the
+\emph{position} $\mathsf{H}_1(y_i) \in [m]$, which we read as a pair
+\[
+  \tau_i \;=\; \text{bin (row)} \in [N],
+  \qquad
+  \beta_i \;=\; \text{block} \in [b],
+  \qquad m = bN .
+\]
+A \emph{layer} is a set of items that can be decoded by one homomorphic
+multiply--accumulate chain, which imposes two constraints:
+
+\begin{enumerate}
+  \item[(C1)] \emph{one item per bin}: two items in the same layer must have
+        distinct bins, since a layer contributes at most one value per slot;
+  \item[(C2)] \emph{bounded span}: the blocks occupied by a layer must fit in
+        $z$ consecutive blocks, since the layer's diagonals are drawn from a
+        window of the encoding, and a wider window means more ciphertext
+        multiplications.
+\end{enumerate}
+
+\emph{Sequencing} is the problem of partitioning the $n$ items into as few
+layers as possible subject to (C1) and (C2). Write $L^\star$ for that minimum.
+
+Both constraints are pairwise, so a layer is an independent set of the
+conflict graph $G = G_{\mathrm{bin}} \cup G_{\mathrm{span}}$ ($G_{\mathrm{bin}}$
+joins equal bins, $G_{\mathrm{span}}$ joins blocks farther than $z$ apart) and
+$L^\star = \chi(G)$. Colouring is hopeless in general -- and indeed optimizing
+over unions of two interval graphs is NP-hard -- so we use the following
+reformulation instead, which is what makes the problem tractable.
+
+\paragraph{Layers are windows.}
+Constraint (C2) says exactly that the blocks of a layer lie in some window
+$[s, s+z-1]$; together with (C1), a layer \emph{is} a window with capacity one
+per bin. So a layering is: a multiset $W$ of window starts (one per layer),
+plus an assignment of each item to a window that covers its block, injectively
+within each bin. An item at block $\beta$ can use the $z$ starts
+\begin{equation}
+  \label{eq:starts}
+  s \in [\beta - z + 1,\; \beta].
+\end{equation}
+Minimizing the number of layers is minimizing $|W|$.
+
+\subsection{When does a set of windows suffice?}
+
+Capacity is one per \emph{(window, bin)} pair, so different bins never compete:
+for a fixed $W$, feasibility decomposes into one matching problem per bin. By
+\eqref{eq:starts} each item's admissible starts form an interval, i.e. each
+per-bin problem is a \emph{convex bipartite} matching, for which Hall's
+condition collapses to intervals. Writing
+\[
+  \mathrm{ext}(J) \;=\; [x-z+1,\; y]
+  \quad\text{for } J = [x,y],
+  \qquad
+  n_\tau(J) = \#\{i : \tau_i = \tau,\ \beta_i \in J\},
+\]
+and $W(S) = \sum_{s \in S} W(s)$, we get:
+
+\begin{lemma}[Hall over intervals]
+\label{lem:hall}
+A window multiset $W$ admits all $n$ items if and only if
+\[
+  W\big(\mathrm{ext}(J)\big) \;\ge\; M(J) := \max_{\tau \in [N]} n_\tau(J)
+  \qquad\text{for every block interval } J .
+\]
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+Necessity is clear: the items of one bin inside $J$ can only be served by
+windows starting in $\mathrm{ext}(J)$. For sufficiency, fix a bin $\tau$ and a
+set $S$ of its items; split the neighbourhood $N(S)$ into maximal runs of
+consecutive starts. The items of one run lie in a block interval
+$J_c = [x_c, y_c]$ whose neighbourhood is exactly $\mathrm{ext}(J_c)$, and the
+runs are disjoint, so the supplies add: $|N(S)| \ge \sum_c W(\mathrm{ext}(J_c))
+\ge \sum_c n_\tau(J_c) \ge |S|$. Hall's theorem then gives a matching for every
+bin, and the matchings for different bins do not interact.
+\end{proof}
+
+\subsection{A min--max theorem}
+
+Lemma~\ref{lem:hall} turns sequencing into a covering problem: minimize
+$\sum_s W(s)$ subject to $W(\mathrm{ext}(J)) \ge M(J)$ for all intervals $J$,
+over integers $W(s) \ge 0$. Each constraint's support $\mathrm{ext}(J)$ is a
+set of \emph{consecutive} starts, so the constraint matrix has the
+consecutive-ones property and is therefore totally unimodular. Its LP
+relaxation has an integral optimum -- so the LP value \emph{is} $L^\star$ --
+and the dual is integral as well, which yields:
+
+\begin{theorem}[Min--max for sequencing]
+\label{thm:minmax}
+\[
+  L^\star \;=\; \max\Big\{ \textstyle\sum_{k=1}^{K} M(J_k) \;:\;
+     J_1,\dots,J_K \text{ block intervals with } \mathrm{ext}(J_k)
+     \text{ pairwise disjoint} \Big\}.
+\]
+\end{theorem}
+
+The ``$\ge$'' direction is combinatorial and worth stating on its own, since it
+is what the security argument leans on: fix such a family; a layer serving an
+item of $J_k$'s heaviest bin must start in $\mathrm{ext}(J_k)$, the extensions
+are disjoint, so each layer is counted for at most one $k$, and $J_k$ needs
+$M(J_k)$ distinct layers. Two special cases are instructive:
+\begin{itemize}
+  \item $K = 1$ with $J = [1,b]$ gives $L^\star \ge \max_\tau (\text{load of }
+        \tau)$, the pigeonhole bound;
+  \item chopping $[1,b]$ into $\lceil b/z \rceil$ windows and adding their
+        per-window maxima is one feasible \emph{primal}, i.e. an upper bound;
+        it is what a naive ``hard partition'' sequencer achieves, and
+        Theorem~\ref{thm:minmax} shows it is generally far from optimal.
+\end{itemize}
+
+\paragraph{The algorithm.}
+We sequence greedily: process blocks left to right and place each item in the
+admissible layer of smallest anchor (opening a new layer, anchored at the
+current block, when none fits). This costs $O(n \cdot L)$ and, on every
+instance we have tested, matches the dual value of
+Theorem~\ref{thm:minmax}: $9{,}400$ randomized small instances checked against
+a brute-force chromatic number, plus the production parameter sets at
+$n \in \{2^{16},2^{18},2^{20}\}$. The dual is itself computable in $O(nb + b^2)$
+by a sweep, so optimality can be \emph{certified per instance} rather than
+assumed; and if a greedy run ever failed to match it, the LP optimum is
+reachable in polynomial time (solve the totally unimodular covering LP, then a
+convex bipartite matching per bin~\cite{Glover67}). The bound of
+Section~\ref{subsec:budget} is stated for $L^\star$, so it is unaffected by
+which of the two the implementation runs.
+
+\subsection{The public layer budget}
+\label{subsec:budget}
+
+The realized layer count is a function of the sender's set: it is driven by
+which items collide in a bin, and collisions are determined by
+$\mathsf{H}_1$ evaluated on the sender's items. Transmitting $L^\star$ would
+therefore leak. Instead both parties derive a \emph{public budget}
+$\bar{L}$ from the parameters alone, and the sender always transmits exactly
+$\bar{L}$ layers -- the $L^\star$ real ones, and $\bar{L} - L^\star$ padding
+layers whose ciphertexts are a random plaintext multiple of a received
+ciphertext, plus the usual mask.
+
+\begin{theorem}[Layer budget]
+\label{thm:budget}
+Let the $n$ positions be uniform and independent over $[R]$, $R = m-w+1$, and
+let
+\[
+  D(g) \;=\; \min\Big\{ k \;:\;
+     \Pr\big[\,\mathrm{Bin}(n,\, g/R) \ge k \,\big] \;\le\;
+     \frac{2^{-\lambda}}{N b^2} \Big\},
+  \qquad
+  \rho^\star \;=\; \max_{1 \le g \le b} \frac{D(g)+1}{g+z-1}.
+\]
+Then, with $\bar{L} = \lceil \rho^\star (b+z-1) \rceil$,
+\[
+  \Pr\big[\, L^\star > \bar{L} \,\big] \;\le\; 2^{-\lambda}.
+\]
+\end{theorem}
+
+\begin{proof}
+Fix a bin $\tau$, a start $x$ and a length $g$. Each item lands in bin $\tau$
+with block in $[x, x+g-1]$ iff its position is one of the $g$ positions mapping
+there, so $n_\tau([x,x+g-1]) \sim \mathrm{Bin}(n, \le g/R)$ and by definition of
+$D(g)$ it exceeds $D(g)$ with probability at most $2^{-\lambda}/(N b^2)$. There
+are at most $N b^2$ triples $(\tau, x, g)$, so by a union bound
+\begin{equation}
+  \label{eq:allJ}
+  \Pr\big[\, \exists J:\ M(J) > D(|J|) \,\big] \;\le\; 2^{-\lambda}.
+\end{equation}
+Assume the complement. Lay windows down at uniform density $\rho^\star$ over
+the $b+z-1$ admissible starts $s \in [-z+1, b-1]$, i.e.
+$W(s) = \lfloor (s+1)\rho^\star \rfloor - \lfloor s \rho^\star \rfloor$; then
+any $\ell$ consecutive starts receive at least $\rho^\star \ell - 1$ windows.
+An interval $J$ with $|J| = g$ has $|\mathrm{ext}(J)| = g+z-1$, hence
+\[
+  W(\mathrm{ext}(J)) \;\ge\; \rho^\star (g+z-1) - 1 \;\ge\; D(g) \;\ge\; M(J),
+\]
+where the middle inequality is the definition of $\rho^\star$. By
+Lemma~\ref{lem:hall} this $W$ is feasible, and it uses
+$\lceil \rho^\star (b+z-1) \rceil = \bar{L}$ windows, so
+$L^\star \le \bar{L}$.
+\end{proof}
+
+Three remarks on how the bound behaves.
+
+\paragraph{It is computed, not extrapolated.}
+$D(g)$ is an exact binomial quantile: the upper tail is summed term by term in
+log space, so $\bar{L}$ is a closed-form function of $(n, N, b, z, \lambda)$
+that both parties evaluate in milliseconds. Nothing here is fitted or
+extrapolated from measurements, in contrast with the band-width selection of
+the underlying OKVS.
+
+\paragraph{Where the slack is.}
+$\bar{L}$ overshoots the realized $L^\star$ for two reasons: the union bound
+charges every one of the $Nb^2$ constraints separately, which is expensive for
+short intervals where the mean count is small; and the uniform-density primal
+pays the worst local ratio everywhere. Both shrink as $z$ grows -- the
+denominator $g+z-1$ absorbs the union tax, and the binding constraint moves
+towards $J = [1,b]$, where the union is over $N$ bins only. Measured at
+$n = 2^{20}$ ($b = 269$):
+\[
+  \begin{array}{c|cccc}
+    z & 20 & 40 & 60 & 80 \\ \hline
+    \bar{L} & 399 & 296 & 266 & 255 \\
+    \mathbb{E}[L^\star] & 196 & 178.5 & 175.5 & 175.5 \\
+    \bar{L} / \mathbb{E}[L^\star] & 2.04 & 1.66 & 1.52 & 1.45
+  \end{array}
+\]
+The pigeonhole floor -- the $2^{-\lambda}$ quantile of the maximum bin load,
+which \emph{no} budget can go below -- is $232$ here, so at $z = 80$ the
+certificate costs only $10\%$ over the information-theoretic minimum.
+
+\paragraph{Cost of the padding.}
+A padding layer costs one plaintext multiplication (versus $w + z$ for a real
+layer), so the compute is driven by $L^\star$; the communication and the number
+of equality instances are driven by $\bar{L}$. Increasing $z$ therefore trades
+a larger per-layer decode against a smaller $\bar{L}$, and in our measurements
+the second effect dominates up to $z \approx 80$.

@@ -195,10 +195,13 @@ u32 sspmtParams::resolveLayerBudget(u64 n) const {
       ++k;
     }
 
-    // rho >= (D(g) + 1) / (g + W) for every g, and the window count is
-    // ceil(rho * (b + W)); kept in integers to avoid rounding surprises.
+    // A layer spans W blocks, so it can serve an item at block beta iff its
+    // start lies in [beta-W+1, beta]: the starts that reach a length-g
+    // interval number g+W-1, and the starts covering all b blocks number
+    // b+W-1. Hence rho >= (D(g)+1)/(g+W-1) for every g, and the window count
+    // is ceil(rho * (b+W-1)); kept in integers to avoid rounding surprises.
     const uint64_t val =
-        divCeil((k + 1) * (uint64_t)(b + W), (uint64_t)(g + W));
+        divCeil((k + 1) * (uint64_t)(b + W - 1), (uint64_t)(g + W - 1));
     budget = std::max(budget, val);
   }
   return (uint32_t)budget;

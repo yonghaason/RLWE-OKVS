@@ -21,37 +21,6 @@ using namespace rlweOkvs;
 
 #include <stdexcept>
 
-struct MaxBinLoadResult {
-    uint32_t max_load;   
-    uint32_t argmax_bin; 
-    std::vector<uint32_t> bin_counts;
-};
-
-MaxBinLoadResult max_occupied_bin_modN(const std::vector<uint32_t>& start_pos, uint32_t N) {
-    if (N == 0) {
-        throw std::invalid_argument("N must be nonzero");
-    }
-
-    std::vector<uint32_t> counts(N, 0);
-
-    for (uint32_t a : start_pos) {
-        uint32_t bin = a % N;
-        counts[bin]++;
-    }
-
-    uint32_t max_load = 0;
-    uint32_t argmax_bin = 0;
-    for (uint32_t bin = 0; bin < N; ++bin) {
-        if (counts[bin] > max_load) {
-            max_load = counts[bin];
-            argmax_bin = bin;
-        }
-    }
-
-    return {max_load, argmax_bin, std::move(counts)};
-}
-
-
 // Exact lower bound on the achievable layer count, via the LP dual of the
 // sequencing problem: the maximum over families of block intervals J_1..J_K
 // whose spanBlocks-extensions are pairwise disjoint of sum_k (max per-bin item
@@ -114,62 +83,6 @@ static uint64_t sequencingLowerBound(const std::vector<uint32_t> &itemBin,
   return g[b - 1];
 }
 
-void sequencing_test(const oc::CLP& cmd)
-{
-    u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
-    u64 w = cmd.getOr("w", 109);
-    double m_ratio = cmd.getOr("m_r", 1.2);
-    u64 span_blocks = cmd.getOr("s", 20);
-    auto repeat = cmd.getOr("repeat", 1);
-
-    Timer timer;
-
-    PRNG prng;
-    prng.SetSeed(oc::ZeroBlock);
-
-    
-
-    size_t span_avg = 0;
-    size_t maxbin_avg = 0;
-
-    timer.setTimePoint("start");
-
-    for (size_t r = 0; r < repeat; r++) {
-        sspmtParams ssParams;
-        ssParams.initialize(n);
-        ssParams.span_blocks = span_blocks;
-        ssParams.bandExpansion = m_ratio;
-        ssParams.bandWidth = w;
-
-        const uint32_t N = ssParams.heNumSlots;
-        const uint32_t m = roundUpTo(ssParams.bandExpansion * n, N);
-
-        vector<uint32_t> bins(n), blks(n);
-        for (size_t i = 0; i < n; i++) {
-            uint32_t pos = prng.get<uint32_t>() % m;
-            bins[i] = pos % N;
-            blks[i] = pos / N;
-        }
-
-        vector<uint32_t> itemToLayer, layerMin, layerMax;
-        span_avg += SspmtSender::sequenceLayers(bins, blks, N, span_blocks,
-                                               itemToLayer, layerMin, layerMax);
-
-        auto res = max_occupied_bin_modN(bins, N);
-        maxbin_avg += res.max_load;
-    }
-    
-    timer.setTimePoint("sequencing_with_span");
-    
-    std::cout << "Span:" << (double) span_avg / repeat
-    <<" / Maximal bin size: " << (double) maxbin_avg / repeat
-    << std::endl;
-    
-    if (cmd.isSet("v")) {
-        cout << timer << endl;
-    }
-}
-
 // Certifies that the greedy sequencing attains the exact optimum of the
 // underlying interval-covering LP. sequenceLayers() outputs a feasible
 // partition and sequencingLowerBound() computes the LP-dual value, which
@@ -227,15 +140,22 @@ void opti_sequencing_test(const oc::CLP& cmd)
 
     sspmtParams params;
     params.initialize(n);
-    uint32_t N = params.heNumSlots;
-    uint64_t m =
-        ((uint64_t)std::ceil(params.bandExpansion * n) + N - 1) / N * N;
-    uint32_t W = params.span_blocks;
+    params.bandWidth = cmd.getOr("w", params.bandWidth);
+    params.bandExpansion = cmd.getOr("m_r", params.bandExpansion);
+    params.span_blocks = cmd.getOr("seq_span", params.span_blocks);
 
+    uint32_t N = params.heNumSlots;
+    uint64_t m = roundUpTo(params.bandExpansion * n, N);
+    uint32_t W = params.span_blocks;
+    // Positions are band starts, so they stop bandWidth-1 short of the end.
+    uint64_t range = m - params.bandWidth + 1;
+    uint32_t budget = params.resolveLayerBudget(n);
+
+    double sumL = 0, sumMax = 0;
     for (int r = 0; r < repeat; ++r) {
         std::vector<uint32_t> bins(n), blks(n);
         for (u64 i = 0; i < n; ++i) {
-            uint64_t pos = prng.get<uint64_t>() % m;
+            uint64_t pos = prng.get<uint64_t>() % range;
             bins[i] = (uint32_t)(pos % N);
             blks[i] = (uint32_t)(pos / N);
         }
@@ -251,13 +171,29 @@ void opti_sequencing_test(const oc::CLP& cmd)
             for (u64 i = 0; i < n; ++i) maxload = std::max(maxload, ++cnt[bins[i]]);
         }
 
-        std::cout << "n=" << n << " b=" << (m / N) << " W=" << W
-                  << " : greedy L=" << L << ", dual LB=" << LB
+        std::cout << "  run " << r << ": greedy L=" << L << ", dual LB=" << LB
                   << ", max bin load=" << maxload << std::endl;
 
         if (L != LB) {
             std::cout << "OPT mismatch on production-size instance" << std::endl;
             throw RTE_LOC;
         }
+        if (L > budget) {
+            std::cout << "layer budget " << budget << " exceeded by " << L
+                      << std::endl;
+            throw RTE_LOC;
+        }
+        sumL += (double)L;
+        sumMax += (double)maxload;
     }
+
+    // What the padding costs: the transmitted layer count is the public
+    // budget, the realized one is what the optimum needs.
+    const double avgL = sumL / repeat;
+    std::cout << "n=" << n << " b=" << (m / N) << " W=" << W << " (w="
+              << params.bandWidth << ", m/n=" << params.bandExpansion << ")"
+              << "\n  E[L] = " << avgL
+              << ", E[max bin load] = " << sumMax / repeat
+              << "\n  layer budget = " << budget << ", slack = "
+              << (double)budget / avgL << "x" << std::endl;
 }

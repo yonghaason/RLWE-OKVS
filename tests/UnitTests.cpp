@@ -16,8 +16,7 @@ namespace rlweOkvsTests {
     // t.add("OKVS_encode_test                 ", encode_test),
     // t.add("OKVS_decode_test                 ", decode_test),
     // t.add("OPRF_protocol_test               ", oprf_protocol_test);
-    t.add("Sequencing_test                  ", sequencing_test);
-    t.add("Sequencing_opt_test              ", opti_sequencing_test);
+    t.add("Sequencing_test                  ", opti_sequencing_test);
     t.add("SSPMT_fulllayout_protocol_test   ", sspmt_fulllayout_protocol_test);
     t.add("PSI_card_test                    ", psi_card_test);
     t.add("PSI_card_sum_test                ", psi_card_sum_test);
