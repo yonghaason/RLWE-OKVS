@@ -260,24 +260,16 @@ uint32_t SspmtSender::sequenceLayersOptimal(
   return kept;
 }
 
-u32 sspmtParams::resolveLayerBudget(u64 n) const {
-  if (layerBudget) {
-    return layerBudget;
-  }
-  if (n == 0) {
-    return 0;
-  }
+namespace {
 
-  const uint32_t numSlots = heNumSlots;
-  const uint64_t m = roundUpTo(bandExpansion * n, numSlots);
-  const uint32_t b = (uint32_t)(m / numSlots);
-  const uint64_t positionRange = m - bandWidth + 1;
-  const uint32_t lambda = layerBudgetLambda;
-  const uint32_t W = std::max<uint32_t>(span_blocks, 1);
-  if (b == 0) {
-    return 0;
+// caps[g-1] = D(g)+1, the per-bin item count a length-g block interval has to
+// be able to absorb. Empty when the parameters degenerate.
+std::vector<uint64_t> hallCaps(u64 n, uint32_t numSlots, uint64_t positionRange,
+                               uint32_t b, uint32_t lambda) {
+  std::vector<uint64_t> caps;
+  if (n == 0 || b == 0) {
+    return caps;
   }
-
   // One share of the 2^-lambda budget per (bin, start position, length)
   // Hall constraint.
   const double logEps = -(double)lambda * std::log(2.0) -
@@ -285,8 +277,8 @@ u32 sspmtParams::resolveLayerBudget(u64 n) const {
                         2.0 * std::log((double)b);
   const double lgn1 = std::lgamma((double)n + 1.0);
 
+  caps.resize(b);
   uint64_t k = 0;  // D(g); nondecreasing in g, so the walk is amortized
-  uint64_t budget = 0;
   for (uint32_t g = 1; g <= b; ++g) {
     const double p = (double)g / (double)positionRange;
     const double logP = std::log((double)g) - std::log((double)positionRange);
@@ -296,17 +288,75 @@ u32 sspmtParams::resolveLayerBudget(u64 n) const {
     while (logBinomUpperTail(n, logP, logQ, lgn1, k, mean) > logEps) {
       ++k;
     }
-
-    // A layer spans W blocks, so it can serve an item at block beta iff its
-    // start lies in [beta-W+1, beta]: the starts that reach a length-g
-    // interval number g+W-1, and the starts covering all b blocks number
-    // b+W-1. Hence rho >= (D(g)+1)/(g+W-1) for every g, and the window count
-    // is ceil(rho * (b+W-1)); kept in integers to avoid rounding surprises.
-    const uint64_t val =
-        divCeil((k + 1) * (uint64_t)(b + W - 1), (uint64_t)(g + W - 1));
-    budget = std::max(budget, val);
+    caps[g - 1] = k + 1;
   }
-  return (uint32_t)budget;
+  return caps;
+}
+
+// A layer spans W blocks, so it can serve an item at block beta iff its start
+// lies in [beta-W+1, beta]: the starts that reach a length-g interval number
+// g+W-1, and the starts covering all b blocks number b+W-1. Hence
+// rho >= caps[g-1]/(g+W-1) for every g, and the window count is
+// ceil(rho * (b+W-1)); kept in integers to avoid rounding surprises.
+uint64_t budgetForSpan(const std::vector<uint64_t> &caps, uint32_t b,
+                       uint32_t W) {
+  uint64_t budget = 0;
+  for (uint32_t g = 1; g <= b; ++g) {
+    budget = std::max(budget, divCeil(caps[g - 1] * (uint64_t)(b + W - 1),
+                                      (uint64_t)(g + W - 1)));
+  }
+  return budget;
+}
+
+}  // namespace
+
+u32 sspmtParams::resolveSpanBlocks(u64 n) const {
+  if (span_blocks) {
+    return span_blocks;
+  }
+  const uint32_t numSlots = heNumSlots;
+  const uint64_t m = roundUpTo(bandExpansion * n, numSlots);
+  const uint32_t b = (uint32_t)(m / numSlots);
+  const auto caps = hallCaps(n, numSlots, m - bandWidth + 1, b,
+                             layerBudgetLambda);
+  if (caps.empty()) {
+    return 1;
+  }
+
+  // The g = b constraint is span-free, so caps.back() is the floor every span
+  // is measured against. Past W = b every window already covers every block,
+  // hence the search stops there.
+  const double floor = (double)caps.back();
+  std::vector<double> obj(b);
+  double best = std::numeric_limits<double>::max();
+  for (uint32_t W = 1; W <= b; ++W) {
+    obj[W - 1] = (double)budgetForSpan(caps, b, W) / floor + spanCostRatio * W;
+    best = std::min(best, obj[W - 1]);
+  }
+  // Communication keeps falling after the time optimum, so take the widest
+  // span still on the plateau.
+  uint32_t span = 1;
+  for (uint32_t W = 1; W <= b; ++W) {
+    if (obj[W - 1] <= best * (1.0 + spanTimeSlack)) {
+      span = W;
+    }
+  }
+  return span;
+}
+
+u32 sspmtParams::resolveLayerBudget(u64 n) const {
+  if (layerBudget) {
+    return layerBudget;
+  }
+  const uint32_t numSlots = heNumSlots;
+  const uint64_t m = roundUpTo(bandExpansion * n, numSlots);
+  const uint32_t b = (uint32_t)(m / numSlots);
+  const auto caps = hallCaps(n, numSlots, m - bandWidth + 1, b,
+                             layerBudgetLambda);
+  if (caps.empty()) {
+    return 0;
+  }
+  return (uint32_t)budgetForSpan(caps, b, resolveSpanBlocks(n));
 }
 
 void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
@@ -377,7 +427,7 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mW = ssParams.bandWidth;
   mNumBatch = mM / mNumSlots;
   mWrap = divCeil(mW * mNumSlots, mM) + 1;
-  mSpanBlocks = ssParams.span_blocks;
+  mSpanBlocks = ssParams.resolveSpanBlocks(mN);
   mFloodBits = ssParams.floodBits;
   mPrng.SetSeed(seed);
 

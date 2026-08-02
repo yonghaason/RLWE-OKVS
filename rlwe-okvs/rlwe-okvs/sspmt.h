@@ -25,7 +25,9 @@ namespace rlweOkvs
         std::vector<int> heCoeffModulus;
         u32 hePlainModulusBits;
         u32 bandWidth;
-        u32 span_blocks;
+        // Blocks a layer may span. Left at 0 both parties derive it from the
+        // public parameters; see resolveSpanBlocks().
+        u32 span_blocks = 0;
         double bandExpansion;
         // Number of layers actually transmitted; see resolveLayerBudget().
         // Left at 0 the parties derive the certified budget at init; set it
@@ -62,6 +64,35 @@ namespace rlweOkvs
         // position, length) constraint -- and the window count is then
         // ceil(rho * (b + span_blocks)).
         u32 resolveLayerBudget(u64 n) const;
+
+        // The span to use for a sender set of size n: span_blocks when set,
+        // otherwise the marginal-cost optimum below. Public parameters only,
+        // so both parties agree without communicating.
+        //
+        // Widening the span by one block trades one extra decode diagonal per
+        // realized layer against the layers it takes off the budget, so the
+        // per-item cost is
+        //     A * resolveLayerBudget(W) + mu * L_real * W + const,
+        // where A is the cost of a layer (its GMW instance plus its returned
+        // ciphertext) and mu that of one plaintext multiplication. Both act on
+        // one layer, i.e. on heNumSlots slots, so neither depends on n and
+        // their ratio spanCostRatio is a single machine constant. Dividing by
+        // A and by the budget floor D(b)+1, and using L_real <= budget ~ floor
+        // once the span is past the knee, leaves the scale-free
+        //     minimize  resolveLayerBudget(W) / floor  +  spanCostRatio * W.
+        // Communication has no diagonal term at all -- it is A's half of the
+        // cost and nothing else -- so it falls monotonically in W; the span is
+        // therefore pushed to the far edge of the objective's spanTimeSlack
+        // plateau rather than to its minimum.
+        u32 resolveSpanBlocks(u64 n) const;
+        // One decode diagonal over one layer, in units of that layer's GMW
+        // instance plus returned ciphertext. Measured at n = 2^20: a layer
+        // costs 34.6 ms (least-squares over the budget across four spans) and
+        // a diagonal 61.5 us (the decode's slope in W, divided by L_real).
+        double spanCostRatio = 1.8e-3;
+        // How far past the time optimum to ride the plateau for the smaller
+        // transcript. One percent of the layer-cost term.
+        double spanTimeSlack = 0.01;
         // heCoeffModulus is {fresh-level primes..., special}. The special
         // prime is consumed only by key switching, which this protocol never
         // performs (no relinearization, no rotation), so its size is free and
@@ -69,14 +100,13 @@ namespace rlweOkvs
         // published sample lives at, once the public key is transmitted for
         // re-randomization -- to 218 bits, the 128-bit bound for N = 8192.
         // (bandExpansion, bandWidth) is a point on that size's OKVS width fit
-        // (log/okvs_nn*_probe_fit.tsv, extrapolated to 2^-40); span_blocks
-        // trades a wider per-layer decode against a smaller layer budget.
-        // Chosen by sweeping the two jointly per size against PSI-Card: span
-        // is the dominant knob, since it takes both the returned ciphertexts
-        // and the GMW instances down with the budget, and once it is large the
-        // budget sits near its floor whatever the expansion -- which is why
-        // the expansion then matters only through the forward ciphertext
-        // count b + w - 1.
+        // (log/okvs_nn*_probe_fit.tsv, extrapolated to 2^-40), chosen by
+        // sweeping it against PSI-Card jointly with the span. The span itself
+        // is left to resolveSpanBlocks(): it is the dominant knob, since it
+        // takes both the returned ciphertexts and the GMW instances down with
+        // the budget, and once it is large the budget sits near its floor
+        // whatever the expansion -- which is why the expansion then matters
+        // only through the forward ciphertext count b + w - 1.
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
@@ -85,7 +115,6 @@ namespace rlweOkvs
                     hePlainModulusBits = 56;
                     bandWidth = 29;
                     bandExpansion = 2.1;
-                    span_blocks = 40;
                     break;
                 case (1ull << 18):
                     floodBits = 50;
@@ -93,7 +122,6 @@ namespace rlweOkvs
                     hePlainModulusBits = 58;
                     bandWidth = 43;
                     bandExpansion = 1.7;
-                    span_blocks = 50;
                     break;
                 case (1ull << 20):
                     floodBits = 52;
@@ -101,7 +129,6 @@ namespace rlweOkvs
                     hePlainModulusBits = 60;
                     bandWidth = 44;
                     bandExpansion = 1.7;
-                    span_blocks = 60;
                     break;
                 case (1ull << 22):
                     floodBits = 52;
@@ -109,14 +136,12 @@ namespace rlweOkvs
                     hePlainModulusBits = 60;
                     bandWidth = 46;
                     bandExpansion = 1.7;
-                    span_blocks = 120;
                     break;
                 default:
                     heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
                     bandWidth = 53;
                     bandExpansion = 1.5;
-                    span_blocks = 20;
                     break;
             }
         }

@@ -164,7 +164,7 @@ void opti_sequencing_test(const oc::CLP& cmd)
 
     uint32_t N = params.heNumSlots;
     uint64_t m = roundUpTo(params.bandExpansion * n, N);
-    uint32_t W = params.span_blocks;
+    uint32_t W = params.resolveSpanBlocks(n);
     // Positions are band starts, so they stop bandWidth-1 short of the end.
     uint64_t range = m - params.bandWidth + 1;
     uint32_t budget = params.resolveLayerBudget(n);

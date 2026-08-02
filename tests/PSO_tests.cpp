@@ -112,7 +112,7 @@ struct PsoFixture
         cout << "\n-------ssPMT Params-------" << endl;
         cout << "n: " << n << ", intersection: " << inter << endl;
         cout << "w: " << params.bandWidth << ", m/n: " << params.bandExpansion
-             << ", seq_span: " << params.span_blocks << endl;
+             << ", seq_span: " << params.resolveSpanBlocks(n) << endl;
         cout << "layer budget: " << params.resolveLayerBudget(n)
              << " (blocks b = " << m / numslots << ")" << endl;
         cout << "--------------------------" << endl;
