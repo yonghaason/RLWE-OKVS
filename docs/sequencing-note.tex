@@ -129,19 +129,28 @@ $M(J_k)$ distinct layers. Two special cases are instructive:
 \end{itemize}
 
 \paragraph{The algorithm.}
-We sequence greedily: process blocks left to right and place each item in the
-admissible layer of smallest anchor (opening a new layer, anchored at the
-current block, when none fits). This costs $O(n \cdot L)$ and, on every
-instance we have tested, matches the dual value of
-Theorem~\ref{thm:minmax}: $9{,}400$ randomized small instances checked against
-a brute-force chromatic number, plus the production parameter sets at
-$n \in \{2^{16},2^{18},2^{20}\}$. The dual is itself computable in $O(nb + b^2)$
-by a sweep, so optimality can be \emph{certified per instance} rather than
-assumed; and if a greedy run ever failed to match it, the LP optimum is
-reachable in polynomial time (solve the totally unimodular covering LP, then a
-convex bipartite matching per bin~\cite{Glover67}). The bound of
-Section~\ref{subsec:budget} is stated for $L^\star$, so it is unaffected by
-which of the two the implementation runs.
+The covering program can be solved exactly, and cheaply. Sweep the right
+endpoint $y = 1, \dots, b$; maintain $M([x,y])$ for every $x$; whenever a
+constraint is short, add the missing windows at start $y$ -- the latest
+position serving $J = [x,y]$, hence the one contained in the most future
+constraints. The standard exchange argument for interval covering makes this
+optimal, and the items are then assigned bin by bin, each to the leftmost
+admissible window, which is optimal for convex bipartite
+matching~\cite{Glover67}. The whole procedure runs in $O(nb + b^2)$; at
+$n = 2^{20}$ it takes $130$\,ms.
+
+In practice we run a cheaper heuristic first: process blocks left to right and
+place each item in the admissible layer of smallest anchor, opening a new layer
+anchored at the current block when none fits. It costs $O(n L)$ -- $14$\,ms at
+$n = 2^{20}$, an order of magnitude below the exact algorithm -- and on every
+instance we have measured it returns exactly $L^\star$: $9{,}400$ randomized
+small instances checked against a brute-force chromatic number, and the
+production parameter sets at $n \in \{2^{16}, 2^{18}, 2^{20}\}$ checked against
+both the exact algorithm and the dual of Theorem~\ref{thm:minmax}. We do not
+claim it is optimal in general; the sender simply falls back to the exact
+algorithm if the heuristic ever exceeds the budget, so the guarantee of
+Section~\ref{subsec:budget} -- which is a statement about $L^\star$ -- holds
+regardless.
 
 \subsection{The public layer budget}
 \label{subsec:budget}

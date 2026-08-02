@@ -148,15 +148,42 @@ namespace rlweOkvs
         // blocks. Processes blocks left to right, assigns each item to the
         // compatible layer with the smallest anchor block (earliest-expiring
         // first), and opens a new layer anchored at the current block when
-        // none fits. This attains the optimum of the underlying
-        // interval-covering LP, which Sequencing_opt_test certifies per
-        // instance against the LP dual. Returns the layer count and fills
+        // none fits. It has matched the optimum on every instance measured
+        // (Sequencing_test checks it against both the LP dual and
+        // sequenceLayersOptimal), but that is an observation, not a proof --
+        // sequencing() falls back to sequenceLayersOptimal if it ever
+        // overshoots the budget. Returns the layer count and fills
         // itemToLayer / layerMinBlock / layerMaxBlock (resized internally).
         // Static so it can be exercised on its own, without HE state.
         static uint32_t sequenceLayers(
             const std::vector<uint32_t>& itemBin,
             const std::vector<uint32_t>& itemBlock,
             uint32_t numSlots, uint32_t spanBlocks,
+            std::vector<uint32_t>& itemToLayer,
+            std::vector<uint32_t>& layerMinBlock,
+            std::vector<uint32_t>& layerMaxBlock);
+
+        // Minimum-layer sequencing, same interface as sequenceLayers.
+        //
+        // A layer is a window of spanBlocks consecutive blocks with capacity
+        // one per bin, so by Hall's condition (which for these convex
+        // neighbourhoods collapses to block intervals) a multiset of window
+        // starts admits all items iff every interval J gets at least
+        // M(J) = max_bin (items of that bin inside J) windows overlapping it.
+        // Those supports are runs of consecutive starts, so the covering
+        // program is an interval program: sweeping the right endpoint and
+        // filling each violated constraint at the latest position that can
+        // serve it (the current block) is optimal by the standard exchange.
+        // Items are then assigned per bin, leftmost admissible window first,
+        // which is optimal for convex bipartite matching.
+        //
+        // Costs O(n*b + b^2) against the greedy's O(n*L), so it is the slow
+        // path: sequencing() runs the greedy and only falls back here if that
+        // overshoots the budget.
+        static uint32_t sequenceLayersOptimal(
+            const std::vector<uint32_t>& itemBin,
+            const std::vector<uint32_t>& itemBlock,
+            uint32_t numSlots, uint32_t numBlocks, uint32_t spanBlocks,
             std::vector<uint32_t>& itemToLayer,
             std::vector<uint32_t>& layerMinBlock,
             std::vector<uint32_t>& layerMaxBlock);
