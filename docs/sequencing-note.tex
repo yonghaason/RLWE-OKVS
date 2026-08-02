@@ -164,6 +164,28 @@ $\bar{L}$ layers -- the $L^\star$ real ones, and $\bar{L} - L^\star$ padding
 layers whose ciphertexts are a random plaintext multiple of a received
 ciphertext, plus the usual mask.
 
+Padding only goes upwards, so the sender aborts exactly when no layering fits
+inside the budget, i.e. when $L^\star > \bar{L}$; Theorem~\ref{thm:budget}
+bounds that event by $2^{-\lambda}$. This is why the fallback of the previous
+subsection matters: the bound is a statement about the \emph{minimum} layer
+count, so the sender has to be able to attain it, and a heuristic that
+overshoots would abort more often than the theorem allows. Conversely, when
+the budget is met, nothing about the realized count reaches the wire: the
+receiver gets $\bar{L}$ ciphertexts and $\bar{L} \cdot N$ equality instances
+whatever $L^\star$ was, and which algorithm produced the layering is
+immaterial.
+
+\begin{remark}[Padding and noise]
+Fixing the transmitted count is necessary but not sufficient: a real layer
+accumulates $w + z$ ciphertext--plaintext products while a padding layer is a
+single one, so their noise magnitudes differ by several bits, and a receiver
+holding the decryption key can recover the noise and count the real layers.
+Making the layers indistinguishable is the job of the noise flooding applied
+before the ciphertexts are returned -- inflating the padding to match, which we
+also tried, does not achieve it, since real layers already differ among
+themselves by occupancy.
+\end{remark}
+
 \begin{theorem}[Layer budget]
 \label{thm:budget}
 Let the $n$ positions be uniform and independent over $[R]$, $R = m-w+1$, and
