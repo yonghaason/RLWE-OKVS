@@ -87,8 +87,10 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 															 const vector<int> &dest)
 {
 	int i, j, x, s;
-	vector<int> bottom1;
-	vector<int> top1;
+	vector<int> &bottom1 = mRouteBottom1[depth];
+	vector<int> &top1 = mRouteTop1[depth];
+	bottom1.clear();
+	top1.clear();
 	int subNetSize = src.size();
 
 	int coDepth = mLogN - depth;
@@ -144,8 +146,10 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 	 */
 	int levels = 2 * coDepth - 1;
 
-	vector<int> bottom2(subNetSize / 2);
-	vector<int> top2(int(ceil(subNetSize * 0.5)));
+	vector<int> &bottom2 = mRouteBottom2[depth];
+	vector<int> &top2 = mRouteTop2[depth];
+	bottom2.assign(subNetSize / 2, 0);
+	top2.assign(int(ceil(subNetSize * 0.5)), 0);
 
 	/*
 	 * destinatia este o permutare a intrari
@@ -334,8 +338,31 @@ void Benes::benesEval(vector<int> &src, int depth, int permIdx)
 	}
 }
 
+// The recursion is depth first, so only one call per level is ever live and a
+// single scratch buffer per level is enough. Sizing them up front removes the
+// four allocations every call was making -- O(n) of them per level.
+void Benes::reserveScratch()
+{
+	mRouteBottom1.resize(mLogN + 2);
+	mRouteTop1.resize(mLogN + 2);
+	mRouteBottom2.resize(mLogN + 2);
+	mRouteTop2.resize(mLogN + 2);
+	mEvalBottom.resize(mLogN + 2);
+	mEvalTop.resize(mLogN + 2);
+	for (int i = 0; i <= mLogN + 1; ++i)
+	{
+		mRouteBottom1[i].reserve(mN);
+		mRouteTop1[i].reserve(mN);
+		mRouteBottom2[i].reserve(mN);
+		mRouteTop2[i].reserve(mN);
+		mEvalBottom[i].reserve(mN);
+		mEvalTop[i].reserve(mN);
+	}
+}
+
 void Benes::genBenesRoute()
 {
+	reserveScratch();
 	vector<int> src(mN);
 	std::iota(src.begin(), src.end(), 0);
 	genBenesRouteInner(0, 0, src, mPerm);
@@ -346,8 +373,10 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 														int depth, int permIdx)
 {
 	int levels, i, j, x, s;
-	oc::BitVector bottom1;
-	oc::BitVector top1;
+	oc::BitVector &bottom1 = mEvalBottom[depth];
+	oc::BitVector &top1 = mEvalTop[depth];
+	bottom1.resize(0);
+	top1.resize(0);
 	int subNetSize = src.size();
 	int coDepth = mLogN - depth;
 	oc::u8 temp, temp_int;

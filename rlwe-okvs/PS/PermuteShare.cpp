@@ -187,6 +187,15 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
 
   setTimePoint("PS.R: copy+swap sot");
 
+  // Depth-first recursion: one scratch buffer per level suffices, and sizing
+  // them up front removes the two allocations every call was making.
+  mScratchBottom.resize(mLogN + 2);
+  mScratchTop.resize(mLogN + 2);
+  for (u64 i = 0; i < mScratchBottom.size(); ++i) {
+    mScratchBottom[i].reserve(mN);
+    mScratchTop[i].reserve(mN);
+  }
+
   std::vector<u8> corrections(mNumSwitches);
   BitVector permuted = masks;
   prepareCorrection(0, 0, permuted, sot, corrections);
@@ -230,8 +239,10 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
     u8 m0, m1, w0, w1, M0, M1;
     int baseIdx;
 
-    oc::BitVector bottom1;
-    oc::BitVector top1;
+    oc::BitVector &bottom1 = mScratchBottom[depth];
+    oc::BitVector &top1 = mScratchTop[depth];
+    bottom1.resize(0);
+    top1.resize(0);
 
     if (subNetSize == 2)
     {

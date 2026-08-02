@@ -20,6 +20,13 @@ class Benes
 	std::vector<int> permInner;
 	std::vector<int> invPermInner;
 
+	// One scratch buffer per recursion level; see reserveScratch().
+	std::vector<std::vector<int>> mRouteBottom1, mRouteTop1;
+	std::vector<std::vector<int>> mRouteBottom2, mRouteTop2;
+	std::vector<oc::BitVector> mEvalBottom, mEvalTop;
+
+	void reserveScratch();
+
 	void DFS(int idx, int route, std::vector<char> &path);
 
 	void genBenesRouteInner(int depth, int permIdx, const std::vector<int> &src,

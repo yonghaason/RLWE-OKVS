@@ -97,6 +97,7 @@ namespace rlweOkvs
 
         // One bit per OT message, two messages per switch.
         std::vector<std::array<oc::u8, 2>> mSotMsgs;
+        std::vector<oc::BitVector> mScratchBottom, mScratchTop;
         oc::BitVector mCorrR;       // the random vector r
         oc::BitVector mCorrShare;   // share of rho(r) from correlate()
 
