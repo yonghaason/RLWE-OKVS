@@ -139,35 +139,49 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
 
     // The permutation was fixed offline and at random, so instead of routing
     // one that puts our items first, we look up where it sent their slots.
-    // Those positions are a uniformly random injection from the receiver's
-    // point of view, so naming them reveals nothing.
     //
-    // The item order still has to be randomized: the receiver does see which
-    // OT index carried a new element, and that index must not be our input
-    // order, or the pattern of matched items leaks by rank.
+    // The receiver has to be told which of its M share positions are the real
+    // ones -- it does not know the permutation. It only needs the *set*: both
+    // sides walk the positions in increasing order, so the k-th marked one is
+    // the k-th OT instance. A bit per position costs M bits, against 4 bytes
+    // per item for an explicit list, and is within a few percent of the
+    // entropy of an n_y-subset of [M].
+    //
+    // Ordering the items by their (random) position is also what randomizes
+    // which OT index carries which item -- the receiver sees which indices
+    // carried a new element, so that order must not be our input order.
     std::vector<int> itemToSlot(mN, -1);
     for (u64 s = 0; s < nSlots; ++s) {
         if (slotToItem[s] != UINT32_MAX) itemToSlot[slotToItem[s]] = (int)s;
     }
-    std::vector<u32> order(mN);
-    std::iota(order.begin(), order.end(), 0u);
-    for (u64 i = mN - 1; i > 0; --i) std::swap(order[i], order[mPrng.get<u64>() % (i + 1)]);
 
     BitVector psShare;
     co_await psSender.apply(psShare, chl);
 
     const auto &invPerm = psSender.getInvPermRef();
-    std::vector<u32> positions(mN);
-    BitVector bits(mN);
+    std::vector<u32> posToItem(nSlots, UINT32_MAX);
+    BitVector realPos(nSlots);
     for (u64 j = 0; j < mN; ++j) {
-        const u32 slot = (u32)itemToSlot[order[j]];
-        const u32 p = (u32)invPerm[slot];
-        positions[j] = p;
-        // psShare[p] ^ (receiver's share)[p] is the membership bit at `slot`;
-        // fold in our own ss-PMT share of that slot.
-        bits[j] = psShare[p] ^ sspmt[slot];
+        const u32 p = (u32)invPerm[itemToSlot[j]];
+        posToItem[p] = (u32)j;
+        realPos[p] = 1;
     }
-    co_await chl.send(coproto::copy(positions));
+    co_await chl.send(realPos);
+
+    // Walk the positions in order; entry k is the item sitting at the k-th
+    // marked position, and its membership bit folds in our own share.
+    std::vector<u32> order(mN);
+    BitVector bits(mN);
+    {
+        u64 k = 0;
+        for (u64 p = 0; p < nSlots; ++p) {
+            const u32 item = posToItem[p];
+            if (item == UINT32_MAX) continue;
+            order[k] = item;
+            bits[k] = psShare[p] ^ sspmt[itemToSlot[item]];
+            ++k;
+        }
+    }
 
     BitVector flip(mN);
     co_await chl.recv(flip);
@@ -221,11 +235,17 @@ Proto PsuReceiver::run(const std::vector<oc::block> &X,
     BitVector psShare;
     co_await psReceiver.apply(sspmt, psShare, chl);
 
-    std::vector<u32> positions;
-    co_await chl.recvResize(positions);
+    // The marked positions, in increasing order, are the OT instances.
+    BitVector realPos(psShare.size());
+    co_await chl.recv(realPos);
 
     BitVector bits(mNother);
-    for (u64 j = 0; j < mNother; ++j) bits[j] = psShare[positions[j]];
+    {
+        u64 k = 0;
+        for (u64 p = 0; p < realPos.size(); ++p) {
+            if (realPos[p]) bits[k++] = psShare[p];
+        }
+    }
 
     BitVector flip(mNother);
     for (u64 j = 0; j < mNother; ++j) flip[j] = mRot.mChoices[j] ^ bits[j];
