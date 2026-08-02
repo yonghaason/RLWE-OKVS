@@ -11,6 +11,8 @@
 #include "../GMW/Gmw.h"
 #include "okvs.h"
 #include "seal/util/numth.h"
+#include "seal/util/ntt.h"
+#include "seal/util/polyarithsmallmod.h"
 #include "seal/util/uintarithsmallmod.h"
 
 #include "macoro/when_all.h"
@@ -361,23 +363,6 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
     mLayerIsPadding[l] = 1;
   }
 
-  // Every slot of the L x H layout -- occupied, empty or padding -- gets a
-  // mask and takes part in the equality, so the occupancy is never revealed.
-  // An empty slot of a real layer decodes to 0, so the sender's mask r and the
-  // receiver's r - indicator differ (the indicator is nonzero) and the slot
-  // shares a 0 deterministically; a padding slot decodes to a random value and
-  // only collides with the indicator with probability 2^-log(p) per slot.
-  mMasks.resize(static_cast<size_t>(mNumLayers) * mNumSlots);
-  ptxts_mask.resize(mNumLayers);
-  vector<uint64_t> raw_masks(mNumSlots);
-  for (size_t lay = 0; lay < mNumLayers; lay++) {
-    mPrng.get<uint64_t>(raw_masks);
-    for (uint32_t bin = 0; bin < mNumSlots; bin++) {
-      raw_masks[bin] = seal::util::barrett_reduce_64(raw_masks[bin], mModulus);
-      mMasks[lay * mNumSlots + bin] = raw_masks[bin];
-    }
-    mBatchEncoder->encode(raw_masks, ptxts_mask[lay]);
-  }
 }
 
 void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
@@ -393,6 +378,7 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mNumBatch = mM / mNumSlots;
   mWrap = divCeil(mW * mNumSlots, mM) + 1;
   mSpanBlocks = ssParams.span_blocks;
+  mFloodBits = ssParams.floodBits;
   mPrng.SetSeed(seed);
 
   // The layout is fixed by the public parameters, not by the sequencing --
@@ -413,7 +399,63 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mContext = make_shared<SEALContext>(parms, true, sec_level_type::none);
   mBatchEncoder = make_unique<BatchEncoder>(*mContext);
   mEvaluator = make_unique<Evaluator>(*mContext);
+
+  // The level the decoded ciphertexts are switched down to before being
+  // returned; the flooded masks have to live there too.
+  mReturnParms = mContext->first_context_data()->next_context_data()->parms_id();
 };
+
+void SspmtSender::addFloodingNoise(seal::Ciphertext &ct) {
+  // BGV keeps the message in the low bits: c0 + c1*s = m + t*e, so the noise
+  // has to be added as a multiple of t. Ciphertexts are stored in NTT form,
+  // hence the transform before accumulating.
+  const auto ctxData = mContext->get_context_data(ct.parms_id());
+  const auto &coeffMod = ctxData->parms().coeff_modulus();
+  const auto ntt = ctxData->small_ntt_tables();
+  const size_t N = ctxData->parms().poly_modulus_degree();
+  const uint64_t t = mModulus.value();
+  const uint64_t bound = uint64_t(1) << mFloodBits;
+  const uint64_t mask = (uint64_t(1) << (mFloodBits + 1)) - 1;
+
+  std::vector<uint64_t> raw(N), tmp(N);
+  mPrng.get<uint64_t>(raw);
+
+  for (size_t i = 0; i < coeffMod.size(); ++i) {
+    const auto &q = coeffMod[i];
+    const uint64_t tq = seal::util::barrett_reduce_64(t, q);
+    const uint64_t bq = seal::util::barrett_reduce_64(bound, q);
+    for (size_t j = 0; j < N; ++j) {
+      // e uniform over [-2^floodBits, 2^floodBits)
+      uint64_t v = seal::util::barrett_reduce_64(raw[j] & mask, q);
+      v = seal::util::sub_uint_mod(v, bq, q);
+      tmp[j] = seal::util::multiply_uint_mod(v, tq, q);
+    }
+    seal::util::ntt_negacyclic_harvey(tmp.data(), ntt[i]);
+    uint64_t *c0 = ct.data(0) + i * N;
+    seal::util::add_poly_coeffmod(c0, tmp.data(), N, q, c0);
+  }
+}
+
+void SspmtSender::buildFloodedMasks() {
+  // Masks are the sender's own randomness, so the whole thing is offline.
+  mMasks.resize(static_cast<size_t>(mNumLayers) * mNumSlots);
+  mFloodedMasks.resize(mNumLayers);
+
+  vector<uint64_t> raw(mNumSlots);
+  Plaintext ptxt;
+  for (uint32_t lay = 0; lay < mNumLayers; ++lay) {
+    mPrng.get<uint64_t>(raw);
+    for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+      raw[bin] = seal::util::barrett_reduce_64(raw[bin], mModulus);
+      mMasks[(size_t)lay * mNumSlots + bin] = raw[bin];
+    }
+    mBatchEncoder->encode(raw, ptxt);
+
+    mEncryptor->encrypt_zero(mReturnParms, mFloodedMasks[lay]);
+    mEvaluator->add_plain_inplace(mFloodedMasks[lay], ptxt);
+    addFloodingNoise(mFloodedMasks[lay]);
+  }
+}
 
 void SspmtSender::initGmw() {
   const u64 keyBitLength = 40 + oc::log2ceil(mN);
@@ -426,6 +468,22 @@ Proto SspmtSender::setup(Socket &chl) {
   if (mSetupDone) {
     co_return;
   }
+
+  setTimePoint("Sender::Setup begin");
+
+  // The receiver's public key: needed to re-randomize what we send back, and
+  // the only thing published at the key level.
+  string pkstr;
+  co_await chl.recvResize(pkstr);
+  {
+    stringstream pkstream(pkstr);
+    PublicKey pk;
+    pk.load(*mContext, pkstream);
+    mEncryptor = make_unique<Encryptor>(*mContext, pk);
+  }
+  buildFloodedMasks();
+  setTimePoint("Sender::Setup (flooded masks)");
+
   initGmw();
   co_await mGmw.generateTriple(chl);
   mSetupDone = true;
@@ -612,30 +670,16 @@ void SspmtSender::encrypted_decode(
     uint32_t layerEnd) {
   decoded_in_he.resize(layerEnd - layerBegin);
 
-  std::vector<uint64_t> padVec(mNumSlots);
-  Plaintext padPtxt;
-
   for (uint32_t i = layerBegin; i < layerEnd; ++i) {
     bool initialized = false;
     Ciphertext tmp;
     Ciphertext &out = decoded_in_he[i - layerBegin];
 
-    // A padding layer's ciphertext only has to decrypt to something the
-    // receiver cannot predict: one received ciphertext times a dense random
-    // plaintext, plus the mask. A single multiply instead of a real layer's
-    // w + span chain -- the padding cost is compute-negligible. Its noise is
-    // therefore smaller than a real layer's; noise-level indistinguishability
-    // (which pre-flooding is broken anyway, since a real layer's noise scales
-    // with its occupancy) is the job of the upcoming noise-flooding step.
+    // A padding layer carries no item, so the flooded mask alone is already
+    // what a decoded layer looks like: a uniform plaintext under a freshly
+    // re-randomized, flooded ciphertext.
     if (mLayerIsPadding[i]) {
-      mPrng.get<uint64_t>(padVec);
-      for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
-        padVec[bin] = seal::util::barrett_reduce_64(padVec[bin], mModulus);
-      }
-      mBatchEncoder->encode(padVec, padPtxt);
-      mEvaluator->multiply_plain(encoded_in_he[0][0], padPtxt, out);
-      mEvaluator->add_plain_inplace(out, ptxts_mask[i]);
-      mEvaluator->mod_switch_to_next_inplace(out);
+      out = mFloodedMasks[i];
       continue;
     }
 
@@ -690,8 +734,10 @@ void SspmtSender::encrypted_decode(
       }
     }
 
-    mEvaluator->add_plain_inplace(out, ptxts_mask[i]);
+    // Switch down first: the flooding lives at the return level, and mod
+    // switching there would divide it away with the rest of the noise.
     mEvaluator->mod_switch_to_next_inplace(out);
+    mEvaluator->add_inplace(out, mFloodedMasks[i]);
   }
 }
 
@@ -793,6 +839,7 @@ void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
   PublicKey public_key;
   keygen.create_public_key(public_key);
 
+  mPublicKey = public_key;
   mEncryptor = make_unique<Encryptor>(*mContext, public_key);
   mEncryptor->set_secret_key(secret_key);
 
@@ -811,6 +858,16 @@ Proto SspmtReceiver::setup(Socket &chl) {
   if (mSetupDone) {
     co_return;
   }
+
+  setTimePoint("Receiver::Setup begin");
+
+  {
+    stringstream pkstream;
+    mPublicKey.save(pkstream);
+    auto payload = pkstream.str();
+    co_await chl.send(move(payload));
+  }
+
   initGmw();
   co_await mGmw.generateTriple(chl);
   mSetupDone = true;

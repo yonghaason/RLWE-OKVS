@@ -33,6 +33,13 @@ namespace rlweOkvs
         u32 layerBudget = 0;
         // Statistical security parameter for the layer budget.
         u32 layerBudgetLambda = 40;
+        // log2 of the flooding noise added to every returned ciphertext, set
+        // per size below. A returned ciphertext carries the mod-switch
+        // rounding floor, whose size is read off the measured noise budget as
+        // log2(e) = returnBits - log2(t) - budget - 1 (8, 10, 12, 12 bits for
+        // the four sizes); floodBits is that plus 40, which leaves the budget
+        // at 3-7 bits after flooding.
+        u32 floodBits = 52;
 
         // The number of layers to transmit for a sender set of size n: the
         // explicit layerBudget when set, otherwise a count that the optimal
@@ -64,6 +71,7 @@ namespace rlweOkvs
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
+                    floodBits = 48;
                     heCoeffModulus = {50, 58, 60, 50};
                     hePlainModulusBits = 56;
                     bandWidth = 28;
@@ -71,6 +79,7 @@ namespace rlweOkvs
                     span_blocks = 9;
                     break;
                 case (1ull << 18):
+                    floodBits = 50;
                     heCoeffModulus = {54, 58, 60, 46};
                     hePlainModulusBits = 58;
                     bandWidth = 28;
@@ -78,6 +87,7 @@ namespace rlweOkvs
                     span_blocks = 13;
                     break;
                 case (1ull << 20):
+                    floodBits = 52;
                     heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
                     bandWidth = 31;
@@ -85,6 +95,7 @@ namespace rlweOkvs
                     span_blocks = 20;
                     break;
                 case (1ull << 22):
+                    floodBits = 52;
                     heCoeffModulus = {60, 60, 60, 38};
                     hePlainModulusBits = 60;
                     bandWidth = 45;
@@ -134,7 +145,14 @@ namespace rlweOkvs
         // layout-matching leak of the KKLS follow-up note (the receiver's band
         // hash is public, so it can predict its own items' slot columns).
         std::vector<uint64_t> mMasks;
-        std::vector<seal::Plaintext> ptxts_mask;
+        // Enc_pk(mask; e_flood) at the return level, one per layer, built
+        // offline. Adding it to a decoded layer does the three jobs the
+        // returned ciphertext needs at once: it re-randomizes the ciphertext
+        // (the fresh u in the encryption of zero is what hides the fact that
+        // the result is a fixed function of the receiver's own ciphertexts and
+        // the sender's diagonals), it floods the computation noise, and it
+        // applies the mask. A padding layer is just this ciphertext.
+        std::vector<seal::Ciphertext> mFloodedMasks;
 
         std::vector<std::vector<seal::Plaintext>> ptxts_diags;
 
@@ -145,7 +163,14 @@ namespace rlweOkvs
         bool mSetupDone = false;
         uint64_t mOTeBatchSize = 1ull << 19;
 
+        unique_ptr<Encryptor> mEncryptor;
+        seal::parms_id_type mReturnParms;
+        u32 mFloodBits;
+
         void initGmw();
+        // c0 += t * e with e uniform over [-2^floodBits, 2^floodBits).
+        void addFloodingNoise(seal::Ciphertext& ct);
+        void buildFloodedMasks();
 
     public:
         // Combinatorial core of the sequencing: partition items (bin, block)
@@ -250,6 +275,8 @@ namespace rlweOkvs
         uint32_t mLayerBudget;
 
         uint64_t mIndicatorStr;
+
+        PublicKey mPublicKey;
 
         volePSI::Gmw mGmw;
         bool mSetupDone = false;
