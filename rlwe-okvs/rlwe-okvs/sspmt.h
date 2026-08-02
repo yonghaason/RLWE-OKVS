@@ -55,6 +55,12 @@ namespace rlweOkvs
         // position, length) constraint -- and the window count is then
         // ceil(rho * (b + span_blocks)).
         u32 resolveLayerBudget(u64 n) const;
+        // heCoeffModulus is {fresh-level primes..., special}. The special
+        // prime is consumed only by key switching, which this protocol never
+        // performs (no relinearization, no rotation), so its size is free and
+        // is set to bring every key-level modulus -- the largest one any
+        // published sample lives at, once the public key is transmitted for
+        // re-randomization -- to 218 bits, the 128-bit bound for N = 8192.
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
@@ -65,20 +71,13 @@ namespace rlweOkvs
                     span_blocks = 9;
                     break;
                 case (1ull << 18):
-                    heCoeffModulus = {54, 58, 60, 50};
+                    heCoeffModulus = {54, 58, 60, 46};
                     hePlainModulusBits = 58;
                     bandWidth = 28;
                     bandExpansion = 2.2;
                     span_blocks = 13;
                     break;
                 case (1ull << 20):
-                    // {fresh-level primes..., special}. The special prime is
-                    // only consumed by key switching, which this protocol
-                    // never does (no relinearization, no rotation), so it is
-                    // sized purely to keep the key-level modulus -- the
-                    // largest one any published sample lives at, once the
-                    // public key is transmitted for re-randomization -- at
-                    // 218 bits, the 128-bit bound for N = 8192.
                     heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
                     bandWidth = 31;
@@ -86,14 +85,14 @@ namespace rlweOkvs
                     span_blocks = 20;
                     break;
                 case (1ull << 22):
-                    heCoeffModulus = {60, 60, 60, 50};
+                    heCoeffModulus = {60, 60, 60, 38};
                     hePlainModulusBits = 60;
                     bandWidth = 45;
                     bandExpansion = 1.7;
                     span_blocks = 30;
                     break;
                 default:
-                    heCoeffModulus = {58, 58, 60, 50};
+                    heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
                     bandWidth = 53;
                     bandExpansion = 1.5;
