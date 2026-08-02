@@ -90,9 +90,14 @@ namespace rlweOkvs
                     floodBits = 52;
                     heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
-                    bandWidth = 31;
-                    bandExpansion = 2.1;
-                    span_blocks = 20;
+                    // (m/n, w) is a point on the OKVS width fit (log/okvs_nn20
+                    // _probe_fit.tsv); span_blocks trades the per-layer decode
+                    // against the layer budget. Swept jointly at this size:
+                    // this is the balance, within 2% of both the time-optimal
+                    // and the communication-optimal corner.
+                    bandWidth = 44;
+                    bandExpansion = 1.7;
+                    span_blocks = 60;
                     break;
                 case (1ull << 22):
                     floodBits = 52;
