@@ -342,7 +342,7 @@ void Benes::genBenesRoute()
 }
 
 void Benes::benesMaskedEval(oc::BitVector &src,
-														std::vector<std::array<oc::u8, 2>> &otMsgs,
+														std::vector<oc::u8> &otMsgs,
 														int depth, int permIdx)
 {
 	int levels, i, j, x, s;
@@ -350,17 +350,15 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 	oc::BitVector top1;
 	int subNetSize = src.size();
 	int coDepth = mLogN - depth;
-	oc::u8 temp, temp_int[2];
-	std::array<oc::u8, 2> temp_block;
+	oc::u8 temp, temp_int;
 
 	if (subNetSize == 2)
 	{
 		if (coDepth == 1)
 		{
-			temp_block = otMsgs[(depth) * (mN / 2) + (permIdx)];
-			memcpy(temp_int, &temp_block, sizeof(temp_int));
-			src[0] = src[0] ^ temp_int[0];
-			src[1] = src[1] ^ temp_int[1];
+			temp_int = otMsgs[(depth) * (mN / 2) + (permIdx)];
+			src[0] = src[0] ^ temp_int;
+			src[1] = src[1] ^ temp_int;
 			if (mSwitches[depth][permIdx] == 1)
 			{
 				temp = src[0];
@@ -370,10 +368,9 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 		}
 		else
 		{
-			temp_block = otMsgs[(depth + 1) * (mN / 2) + (permIdx)];
-			memcpy(temp_int, temp_block.data(), sizeof(temp_int));
-			src[0] = src[0] ^ temp_int[0];
-			src[1] = src[1] ^ temp_int[1];
+			temp_int = otMsgs[(depth + 1) * (mN / 2) + (permIdx)];
+			src[0] = src[0] ^ temp_int;
+			src[1] = src[1] ^ temp_int;
 			if (mSwitches[depth + 1][permIdx] == 1)
 			{
 				temp = src[0];
@@ -386,10 +383,9 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 
 	if (subNetSize == 3)
 	{
-		temp_block = otMsgs[(depth) * (mN / 2) + (permIdx)];
-		memcpy(temp_int, temp_block.data(), sizeof(temp_int));
-		src[0] = src[0] ^ temp_int[0];
-		src[1] = src[1] ^ temp_int[1];
+		temp_int = otMsgs[(depth) * (mN / 2) + (permIdx)];
+		src[0] = src[0] ^ temp_int;
+		src[1] = src[1] ^ temp_int;
 		if (mSwitches[depth][permIdx] == 1)
 		{
 			temp = src[0];
@@ -397,10 +393,9 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 			src[1] = temp;
 		}
 
-		temp_block = otMsgs[(depth + 1) * (mN / 2) + (permIdx)];
-		memcpy(temp_int, temp_block.data(), sizeof(temp_int));
-		src[1] = src[1] ^ temp_int[0];
-		src[2] = src[2] ^ temp_int[1];
+		temp_int = otMsgs[(depth + 1) * (mN / 2) + (permIdx)];
+		src[1] = src[1] ^ temp_int;
+		src[2] = src[2] ^ temp_int;
 		if (mSwitches[depth + 1][permIdx] == 1)
 		{
 			temp = src[1];
@@ -408,10 +403,9 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 			src[2] = temp;
 		}
 
-		temp_block = otMsgs[(depth + 2) * (mN / 2) + (permIdx)];
-		memcpy(temp_int, temp_block.data(), sizeof(temp_int));
-		src[0] = src[0] ^ temp_int[0];
-		src[1] = src[1] ^ temp_int[1];
+		temp_int = otMsgs[(depth + 2) * (mN / 2) + (permIdx)];
+		src[0] = src[0] ^ temp_int;
+		src[1] = src[1] ^ temp_int;
 		if (mSwitches[depth + 2][permIdx] == 1)
 		{
 			temp = src[0];
@@ -429,11 +423,10 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 	{
 		int s = mSwitches[depth][permIdx + i / 2];
 
-		temp_block = otMsgs[(depth) * (mN / 2) + (permIdx + i / 2)];
-		memcpy(temp_int, temp_block.data(), sizeof(temp_int));
+		temp_int = otMsgs[(depth) * (mN / 2) + (permIdx + i / 2)];
 
-		src[i] = src[i] ^ temp_int[0];
-		src[i ^ 1] = src[i ^ 1] ^ temp_int[1]; //  ^ or | ??
+		src[i] = src[i] ^ temp_int;
+		src[i ^ 1] = src[i ^ 1] ^ temp_int; //  ^ or | ??
 
 		for (j = 0; j < 2; ++j)
 		{
@@ -471,10 +464,9 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 			}
 		}
 
-		temp_block = otMsgs[(depth + levels - 1) * (mN / 2) + (permIdx + i / 2)];
-		memcpy(temp_int, temp_block.data(), sizeof(temp_int));
-		src[i] = src[i] ^ temp_int[s];
-		src[i ^ 1] = src[i ^ 1] ^ temp_int[1 - s];
+		temp_int = otMsgs[(depth + levels - 1) * (mN / 2) + (permIdx + i / 2)];
+		src[i] = src[i] ^ temp_int;
+		src[i ^ 1] = src[i ^ 1] ^ temp_int;
 	}
 
 	int idx = int(ceil(subNetSize * 0.5));

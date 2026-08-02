@@ -33,9 +33,11 @@ public:
 
 	void benesEval(std::vector<int> &vec, int depth = 0, int permIdx = 0);
 
-	// otMsgs is flat, indexed column * (n/2) + switch.
+	// otMsgs is flat, indexed column * (n/2) + switch, one bit per switch:
+	// the same bit is xored into both wires, which is what makes a single-bit
+	// message enough (see PermuteShare).
 	void benesMaskedEval(oc::BitVector &src,
-											std::vector<std::array<oc::u8, 2>> &otMsgs,
+											std::vector<oc::u8> &otMsgs,
 											int depth = 0, int permIdx = 0);
 
 

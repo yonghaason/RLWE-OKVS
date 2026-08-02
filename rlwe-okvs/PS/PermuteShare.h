@@ -53,9 +53,8 @@ namespace rlweOkvs
         oc::u64 mN = 0, mLogN = 0, mNumColumns = 0, mNumSwitches = 0;
         Benes mBenes;
 
-        // Two bits per switch, distilled from the OT message at generation
-        // time: the message's low bit and the low bit of its AES image. Keeps
-        // the offline material at 2 bits/switch instead of a 16-byte block.
+        // One bit per switch, distilled from the OT message at generation
+        // time, instead of a 16-byte block.
         std::vector<oc::u8> mRotBits;
         oc::BitVector mRotChoices;
         oc::BitVector mCorrShare;   // share of rho(r) from correlate()
@@ -96,16 +95,15 @@ namespace rlweOkvs
     {
         oc::u64 mN = 0, mLogN = 0, mNumColumns = 0, mNumSwitches = 0;
 
-        // Four bits per switch: for each of the two OT messages, the pair of
-        // bits the two wires of that switch consume.
-        std::vector<std::array<std::array<oc::u8, 2>, 2>> mSotMsgs;
+        // One bit per OT message, two messages per switch.
+        std::vector<std::array<oc::u8, 2>> mSotMsgs;
         oc::BitVector mCorrR;       // the random vector r
         oc::BitVector mCorrShare;   // share of rho(r) from correlate()
 
         void prepareCorrection(oc::u64 depth, oc::u64 permIdx,
             oc::BitVector& src,
-            std::vector<std::array<std::array<oc::u8, 2>, 2>>& otMsgs,
-            std::vector<std::array<oc::u8, 2>>& corrections);
+            std::vector<std::array<oc::u8, 2>>& otMsgs,
+            std::vector<oc::u8>& corrections);
 
     public:
         void init(oc::u64 n);

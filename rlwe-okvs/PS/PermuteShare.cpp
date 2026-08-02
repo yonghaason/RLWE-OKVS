@@ -4,16 +4,13 @@
 #include <cstring>
 #include <numeric>
 
-#include "cryptoTools/Crypto/AES.h"
 
 using namespace oc;
 
 namespace rlweOkvs {
 namespace {
-// The two bits a switch consumes from one OT message.
-inline std::array<u8, 2> msgBits(const block &m, const AES &aes) {
-  return {(u8)(m.mData[0] & 1), (u8)(aes.ecbEncBlock(m).mData[0] & 1)};
-}
+// A switch consumes a single bit from its OT message.
+inline u8 msgBit(const block &m) { return (u8)(m.mData[0] & 1); }
 
 // Silent OT in chunks, so the block buffers never hold all mNumSwitches at
 // once; each chunk is distilled to bits and dropped.
@@ -54,8 +51,7 @@ void PermuteShareSender::setPermutation(std::vector<int> perm) {
 
 Proto PermuteShareSender::setup(SilentOtExtReceiver &ot, PRNG &prng,
                                 Socket &chl) {
-  AES aes(oc::ZeroBlock);
-  mRotBits.resize(mNumSwitches * 2);
+  mRotBits.resize(mNumSwitches);
   mRotChoices.resize(mNumSwitches);
 
   std::vector<block> msgs;
@@ -66,9 +62,7 @@ Proto PermuteShareSender::setup(SilentOtExtReceiver &ot, PRNG &prng,
     choices.resize(len);
     co_await ot.silentReceive(choices, msgs, prng, chl, oc::OTType::Random);
     for (u64 i = 0; i < len; ++i) {
-      const auto b = msgBits(msgs[i], aes);
-      mRotBits[2 * (begin + i)] = b[0];
-      mRotBits[2 * (begin + i) + 1] = b[1];
+      mRotBits[begin + i] = msgBit(msgs[i]);
       mRotChoices[begin + i] = choices[i];
     }
   }
@@ -84,22 +78,17 @@ Proto PermuteShareSender::run(BitVector &share, Socket &chl) {
   bitCorrection ^= mRotChoices;
   co_await chl.send(bitCorrection);
 
-  std::vector<BitVector> recvCorr(2);
-  recvCorr[0].resize(mNumSwitches);
-  recvCorr[1].resize(mNumSwitches);
-  co_await chl.recv(recvCorr[0]);
-  co_await chl.recv(recvCorr[1]);
+  BitVector recvCorr(mNumSwitches);
+  co_await chl.recv(recvCorr);
   setTimePoint("PS.S: recv corrections");
 
-  std::vector<std::array<u8, 2>> recvMsg(mNumSwitches);
+  std::vector<u8> recvMsg(mNumSwitches);
   {
     const u8 *sw = switches.data();
-    const u8 *c0 = recvCorr[0].data();
-    const u8 *c1 = recvCorr[1].data();
+    const u8 *cc = recvCorr.data();
     for (u64 i = 0; i < mNumSwitches; ++i) {
       const u8 m = (u8)(0 - bitAt(sw, i));  // 0x00 or 0xff
-      recvMsg[i] = {(u8)(mRotBits[2 * i] ^ (bitAt(c0, i) & m)),
-                    (u8)(mRotBits[2 * i + 1] ^ (bitAt(c1, i) & m))};
+      recvMsg[i] = (u8)(mRotBits[i] ^ (bitAt(cc, i) & m));
     }
   }
 
@@ -156,7 +145,6 @@ void PermuteShareReceiver::init(u64 n) {
 
 Proto PermuteShareReceiver::setup(SilentOtExtSender &ot, PRNG &prng,
                                   Socket &chl) {
-  AES aes(oc::ZeroBlock);
   mSotMsgs.resize(mNumSwitches);
 
   std::vector<std::array<block, 2>> msgs;
@@ -165,8 +153,8 @@ Proto PermuteShareReceiver::setup(SilentOtExtSender &ot, PRNG &prng,
     msgs.resize(len);
     co_await ot.silentSend(msgs, prng, chl);
     for (u64 i = 0; i < len; ++i) {
-      mSotMsgs[begin + i][0] = msgBits(msgs[i][0], aes);
-      mSotMsgs[begin + i][1] = msgBits(msgs[i][1], aes);
+      mSotMsgs[begin + i][0] = msgBit(msgs[i][0]);
+      mSotMsgs[begin + i][1] = msgBit(msgs[i][1]);
     }
   }
   setTimePoint("PermuteShareReceiver::Setup (switch OTs)");
@@ -191,35 +179,26 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
     const u8 *bc = bitCorrection.data();
     for (u64 i = 0; i < mNumSwitches; ++i) {
       const u8 m = (u8)(0 - bitAt(bc, i));
-      for (u64 k = 0; k < 2; ++k) {
-        const u8 t = (u8)((sot[i][0][k] ^ sot[i][1][k]) & m);
-        sot[i][0][k] ^= t;
-        sot[i][1][k] ^= t;
-      }
+      const u8 t = (u8)((sot[i][0] ^ sot[i][1]) & m);
+      sot[i][0] ^= t;
+      sot[i][1] ^= t;
     }
   }
 
   setTimePoint("PS.R: copy+swap sot");
 
-  std::vector<std::array<u8, 2>> corrections(mNumSwitches);
+  std::vector<u8> corrections(mNumSwitches);
   BitVector permuted = masks;
   prepareCorrection(0, 0, permuted, sot, corrections);
   setTimePoint("PS.R: prepare corrections");
 
-  std::vector<BitVector> corrBits(2);
-  corrBits[0].resize(mNumSwitches);
-  corrBits[1].resize(mNumSwitches);
+  BitVector corrBits(mNumSwitches);
   {
-    u8 *b0 = corrBits[0].data();
-    u8 *b1 = corrBits[1].data();
-    for (u64 i = 0; i < mNumSwitches; ++i) {
-      orBit(b0, i, corrections[i][0]);
-      orBit(b1, i, corrections[i][1]);
-    }
+    u8 *b = corrBits.data();
+    for (u64 i = 0; i < mNumSwitches; ++i) orBit(b, i, corrections[i]);
   }
   setTimePoint("PS.R: pack corrections");
-  co_await chl.send(corrBits[0]);
-  co_await chl.send(corrBits[1]);
+  co_await chl.send(corrBits);
 
   // The sender evaluates the network on (mask ^ input), so its output and the
   // permuted masks are shares of pi(input).
@@ -233,8 +212,8 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
 
   void PermuteShareReceiver::prepareCorrection(
     u64 depth, u64 permIdx, oc::BitVector &src,
-    std::vector<std::array<std::array<u8, 2>, 2>> &otMsgs,
-    std::vector<std::array<u8, 2>> &corrections)
+    std::vector<std::array<u8, 2>> &otMsgs,
+    std::vector<u8> &corrections)
   {
     // ot message M0 = m0 ^ w0 || m1 ^ w1
     //  for each switch: top wire m0 w0 - bottom wires m1, w1
@@ -244,8 +223,11 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
 
     int subNetSize = src.size();
 
-    u8 m0, m1, w0, w1, M0[2], M1[2], corrMsg[2];
-    std::array<u8, 2> temp;
+    // One-bit messages: the receiver picks the outgoing masks as
+    // w0 = M0 ^ m0 and w1 = M0 ^ m1, so both wires consume the same bit and
+    // the corrected M1 is M0 ^ m0 ^ m1. That is what the XOR of a switch's two
+    // outputs being invariant buys -- half the message, half the correction.
+    u8 m0, m1, w0, w1, M0, M1;
     int baseIdx;
 
     oc::BitVector bottom1;
@@ -258,18 +240,11 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
         baseIdx = depth * (mN / 2) + permIdx;
         m0 = (u8)src[0];
         m1 = (u8)src[1];
-        temp = otMsgs[baseIdx][0];
-        memcpy(M0, temp.data(), sizeof(M0));
-        w0 = M0[0] ^ m0;
-        w1 = M0[1] ^ m1;
-        temp = otMsgs[baseIdx][1];
-        memcpy(M1, temp.data(), sizeof(M1));
-        corrMsg[0] = M1[0] ^ m0 ^ w1;
-        corrMsg[1] = M1[1] ^ m1 ^ w0;
-        corrections[baseIdx] = {corrMsg[0], corrMsg[1]};
-        M1[0] = m0 ^ w1;
-        M1[1] = m1 ^ w0;
-        otMsgs[baseIdx][1] = {M1[0], M1[1]};
+        M0 = otMsgs[baseIdx][0];
+      w0 = M0 ^ m0;
+      w1 = M0 ^ m1;
+      M1 = (u8)(M0 ^ m0 ^ m1);
+      corrections[baseIdx] = (u8)(otMsgs[baseIdx][1] ^ M1);
         src[0] = w0;
         src[1] = w1;
       }
@@ -278,18 +253,11 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
         baseIdx = (depth + 1) * (mN / 2) + permIdx;
         m0 = (u8)src[0];
         m1 = (u8)src[1];
-        temp = otMsgs[baseIdx][0];
-        memcpy(M0, temp.data(), sizeof(M0));
-        w0 = M0[0] ^ m0;
-        w1 = M0[1] ^ m1;
-        temp = otMsgs[baseIdx][1];
-        memcpy(M1, temp.data(), sizeof(M1));
-        corrMsg[0] = M1[0] ^ m0 ^ w1;
-        corrMsg[1] = M1[1] ^ m1 ^ w0;
-        corrections[baseIdx] = {corrMsg[0], corrMsg[1]};
-        M1[0] = m0 ^ w1;
-        M1[1] = m1 ^ w0;
-        otMsgs[baseIdx][1] = {M1[0], M1[1]};
+        M0 = otMsgs[baseIdx][0];
+      w0 = M0 ^ m0;
+      w1 = M0 ^ m1;
+      M1 = (u8)(M0 ^ m0 ^ m1);
+      corrections[baseIdx] = (u8)(otMsgs[baseIdx][1] ^ M1);
         src[0] = w0;
         src[1] = w1;
       }
@@ -301,54 +269,33 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
       baseIdx = depth * (mN / 2) + permIdx;
       m0 = (u8)src[0];
       m1 = (u8)src[1];
-      temp = otMsgs[baseIdx][0];
-      memcpy(M0, temp.data(), sizeof(M0));
-      w0 = M0[0] ^ m0;
-      w1 = M0[1] ^ m1;
-      temp = otMsgs[baseIdx][1];
-      memcpy(M1, temp.data(), sizeof(M1));
-      corrMsg[0] = M1[0] ^ m0 ^ w1;
-      corrMsg[1] = M1[1] ^ m1 ^ w0;
-      corrections[baseIdx] = {corrMsg[0], corrMsg[1]};
-      M1[0] = m0 ^ w1;
-      M1[1] = m1 ^ w0;
-      otMsgs[baseIdx][1] = {M1[0], M1[1]};
+      M0 = otMsgs[baseIdx][0];
+      w0 = M0 ^ m0;
+      w1 = M0 ^ m1;
+      M1 = (u8)(M0 ^ m0 ^ m1);
+      corrections[baseIdx] = (u8)(otMsgs[baseIdx][1] ^ M1);
       src[0] = w0;
       src[1] = w1;
 
       baseIdx = (depth + 1) * (mN / 2) + permIdx;
       m0 = (u8)src[1];
       m1 = (u8)src[2];
-      temp = otMsgs[baseIdx][0];
-      memcpy(M0, temp.data(), sizeof(M0));
-      w0 = M0[0] ^ m0;
-      w1 = M0[1] ^ m1;
-      temp = otMsgs[baseIdx][1];
-      memcpy(M1, temp.data(), sizeof(M1));
-      corrMsg[0] = M1[0] ^ m0 ^ w1;
-      corrMsg[1] = M1[1] ^ m1 ^ w0;
-      corrections[baseIdx] = {corrMsg[0], corrMsg[1]};
-      M1[0] = m0 ^ w1;
-      M1[1] = m1 ^ w0;
-      otMsgs[baseIdx][1] = {M1[0], M1[1]};
+      M0 = otMsgs[baseIdx][0];
+      w0 = M0 ^ m0;
+      w1 = M0 ^ m1;
+      M1 = (u8)(M0 ^ m0 ^ m1);
+      corrections[baseIdx] = (u8)(otMsgs[baseIdx][1] ^ M1);
       src[1] = w0;
       src[2] = w1;
 
       baseIdx = (depth + 2) * (mN / 2) + permIdx;
       m0 = (u8)src[0];
       m1 = (u8)src[1];
-      temp = otMsgs[baseIdx][0];
-      memcpy(M0, temp.data(), sizeof(M0));
-      w0 = M0[0] ^ m0;
-      w1 = M0[1] ^ m1;
-      temp = otMsgs[baseIdx][1];
-      memcpy(M1, temp.data(), sizeof(M1));
-      corrMsg[0] = M1[0] ^ m0 ^ w1;
-      corrMsg[1] = M1[1] ^ m1 ^ w0;
-      corrections[baseIdx] = {corrMsg[0], corrMsg[1]};
-      M1[0] = m0 ^ w1;
-      M1[1] = m1 ^ w0;
-      otMsgs[baseIdx][1] = {M1[0], M1[1]};
+      M0 = otMsgs[baseIdx][0];
+      w0 = M0 ^ m0;
+      w1 = M0 ^ m1;
+      M1 = (u8)(M0 ^ m0 ^ m1);
+      corrections[baseIdx] = (u8)(otMsgs[baseIdx][1] ^ M1);
       src[0] = w0;
       src[1] = w1;
       return;
@@ -360,18 +307,11 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
       baseIdx = (depth) * (mN / 2) + permIdx + i / 2;
       m0 = (u8)src[i];
       m1 = (u8)src[i ^ 1];
-      temp = otMsgs[baseIdx][0];
-      memcpy(M0, temp.data(), sizeof(M0));
-      w0 = M0[0] ^ m0;
-      w1 = M0[1] ^ m1;
-      temp = otMsgs[baseIdx][1];
-      memcpy(M1, temp.data(), sizeof(M1));
-      corrMsg[0] = M1[0] ^ m0 ^ w1;
-      corrMsg[1] = M1[1] ^ m1 ^ w0;
-      corrections[baseIdx] = {corrMsg[0], corrMsg[1]};
-      M1[0] = m0 ^ w1;
-      M1[1] = m1 ^ w0;
-      otMsgs[baseIdx][1] = {M1[0], M1[1]};
+      M0 = otMsgs[baseIdx][0];
+      w0 = M0 ^ m0;
+      w1 = M0 ^ m1;
+      M1 = (u8)(M0 ^ m0 ^ m1);
+      corrections[baseIdx] = (u8)(otMsgs[baseIdx][1] ^ M1);
       src[i] = w0;
       src[i ^ 1] = w1;
 
@@ -393,18 +333,11 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
       baseIdx = (depth + levels - 1) * (mN / 2) + permIdx + i / 2;
       m1 = (u8)top1[i / 2];
       m0 = (u8)bottom1[i / 2];
-      temp = otMsgs[baseIdx][0];
-      memcpy(M0, temp.data(), sizeof(M0));
-      w0 = M0[0] ^ m0;
-      w1 = M0[1] ^ m1;
-      temp = otMsgs[baseIdx][1];
-      memcpy(M1, temp.data(), sizeof(M1));
-      corrMsg[0] = M1[0] ^ m0 ^ w1;
-      corrMsg[1] = M1[1] ^ m1 ^ w0;
-      corrections[baseIdx] = {corrMsg[0], corrMsg[1]};
-      M1[0] = m0 ^ w1;
-      M1[1] = m1 ^ w0;
-      otMsgs[baseIdx][1] = {M1[0], M1[1]};
+      M0 = otMsgs[baseIdx][0];
+      w0 = M0 ^ m0;
+      w1 = M0 ^ m1;
+      M1 = (u8)(M0 ^ m0 ^ m1);
+      corrections[baseIdx] = (u8)(otMsgs[baseIdx][1] ^ M1);
       src[i] = w0;
       src[i ^ 1] = w1;
     }
