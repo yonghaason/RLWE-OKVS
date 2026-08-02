@@ -18,6 +18,17 @@ inline std::array<u8, 2> msgBits(const block &m, const AES &aes) {
 // Silent OT in chunks, so the block buffers never hold all mNumSwitches at
 // once; each chunk is distilled to bits and dropped.
 constexpr u64 kOtChunk = 1ull << 22;
+
+// BitVector packs bits LSB-first. Walking a byte at a time and shifting keeps
+// the per-bit work to a shift and a mask, instead of the index arithmetic and
+// bounds check operator[] does -- these loops run once per switch, tens of
+// millions of times.
+// The bits are random, so every branch on one is a coin flip the predictor
+// cannot win; these loops stay branchless.
+inline u8 bitAt(const u8 *bytes, u64 i) { return (bytes[i >> 3] >> (i & 7)) & 1; }
+inline void orBit(u8 *bytes, u64 i, u8 v) {
+  bytes[i >> 3] |= (u8)((v & 1) << (i & 7));  // buffer starts zeroed
+}
 }  // namespace
 
 u64 permuteShareSwitchCount(u64 n) {
@@ -81,13 +92,15 @@ Proto PermuteShareSender::run(BitVector &share, Socket &chl) {
   setTimePoint("PS.S: recv corrections");
 
   std::vector<std::array<u8, 2>> recvMsg(mNumSwitches);
-  for (u64 i = 0; i < mNumSwitches; ++i) {
-    u8 a = mRotBits[2 * i], b = mRotBits[2 * i + 1];
-    if (switches[i]) {
-      a ^= (u8)recvCorr[0][i];
-      b ^= (u8)recvCorr[1][i];
+  {
+    const u8 *sw = switches.data();
+    const u8 *c0 = recvCorr[0].data();
+    const u8 *c1 = recvCorr[1].data();
+    for (u64 i = 0; i < mNumSwitches; ++i) {
+      const u8 m = (u8)(0 - bitAt(sw, i));  // 0x00 or 0xff
+      recvMsg[i] = {(u8)(mRotBits[2 * i] ^ (bitAt(c0, i) & m)),
+                    (u8)(mRotBits[2 * i + 1] ^ (bitAt(c1, i) & m))};
     }
-    recvMsg[i] = {a, b};
   }
 
   setTimePoint("PS.S: apply corrections");
@@ -95,14 +108,9 @@ Proto PermuteShareSender::run(BitVector &share, Socket &chl) {
   share.resize(mN);
   co_await chl.recv(share);
 
-  std::vector<std::vector<std::array<u8, 2>>> matrix(mNumColumns);
-  u64 ctr = 0;
-  for (u64 i = 0; i < mNumColumns; ++i) {
-    matrix[i].resize(mN);
-    for (u64 j = 0; j < mN / 2; ++j) matrix[i][j] = recvMsg[ctr++];
-  }
-  setTimePoint("PS.S: build matrix");
-  mBenes.benesMaskedEval(share, matrix);
+  // recvMsg is already laid out column * (mN/2) + switch, which is what the
+  // evaluation indexes -- no matrix to build.
+  mBenes.benesMaskedEval(share, recvMsg);
   setTimePoint("PS.S: masked eval");
 }
 
@@ -176,10 +184,19 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
   setTimePoint("PS.R: recv bitcorrection");
 
   // Swap the message pair wherever the sender's switch disagreed with the
-  // random choice bit of the offline OT.
-  auto sot = mSotMsgs;
-  for (u64 i = 0; i < mNumSwitches; ++i) {
-    if (bitCorrection[i]) std::swap(sot[i][0], sot[i][1]);
+  // random choice bit of the offline OT. Done in place: the offline material
+  // is consumed by this run.
+  auto &sot = mSotMsgs;
+  {
+    const u8 *bc = bitCorrection.data();
+    for (u64 i = 0; i < mNumSwitches; ++i) {
+      const u8 m = (u8)(0 - bitAt(bc, i));
+      for (u64 k = 0; k < 2; ++k) {
+        const u8 t = (u8)((sot[i][0][k] ^ sot[i][1][k]) & m);
+        sot[i][0][k] ^= t;
+        sot[i][1][k] ^= t;
+      }
+    }
   }
 
   setTimePoint("PS.R: copy+swap sot");
@@ -192,9 +209,13 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
   std::vector<BitVector> corrBits(2);
   corrBits[0].resize(mNumSwitches);
   corrBits[1].resize(mNumSwitches);
-  for (u64 i = 0; i < mNumSwitches; ++i) {
-    corrBits[0][i] = corrections[i][0];
-    corrBits[1][i] = corrections[i][1];
+  {
+    u8 *b0 = corrBits[0].data();
+    u8 *b1 = corrBits[1].data();
+    for (u64 i = 0; i < mNumSwitches; ++i) {
+      orBit(b0, i, corrections[i][0]);
+      orBit(b1, i, corrections[i][1]);
+    }
   }
   setTimePoint("PS.R: pack corrections");
   co_await chl.send(corrBits[0]);

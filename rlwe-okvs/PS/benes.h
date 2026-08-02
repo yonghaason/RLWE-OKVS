@@ -33,8 +33,9 @@ public:
 
 	void benesEval(std::vector<int> &vec, int depth = 0, int permIdx = 0);
 
+	// otMsgs is flat, indexed column * (n/2) + switch.
 	void benesMaskedEval(oc::BitVector &src,
-											std::vector<std::vector<std::array<oc::u8, 2>>> &otMsgs,
+											std::vector<std::array<oc::u8, 2>> &otMsgs,
 											int depth = 0, int permIdx = 0);
 
 
