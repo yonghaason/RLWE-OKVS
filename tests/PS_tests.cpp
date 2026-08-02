@@ -93,6 +93,49 @@ void permute_share_test(const oc::CLP& cmd)
         }
     }
 
+    // --- the correlated (offline/online) form ---------------------------
+    {
+        auto socket2 = coproto::LocalAsyncSocket::makePair();
+        socket2[0].setExecutor(pool0);
+        socket2[1].setExecutor(pool1);
+
+        PermuteShareSender sender2;
+        PermuteShareReceiver receiver2;
+        sender2.setTimer(timer_s);
+        receiver2.setTimer(timer_r);
+        sender2.init(n);
+        receiver2.init(n);
+
+        SilentOtExtReceiver otRecv2;
+        SilentOtExtSender otSend2;
+        PRNG prngS2(block(5, 6)), prngR2(block(7, 8));
+
+        runBoth(sender2.correlate(otRecv2, prngS2, socket2[0]),
+                receiver2.correlate(otSend2, prngR2, socket2[1]));
+        const u64 corrBytes = socket2[0].bytesSent() + socket2[1].bytesSent();
+
+        BitVector sShare, rShare;
+        runBoth(sender2.apply(sShare, socket2[0]),
+                receiver2.apply(input, rShare, socket2[1]));
+
+        // The permutation is the sender's random one this time.
+        const auto& rho = sender2.getPermRef();
+        for (u64 i = 0; i < n; ++i) {
+            const u8 got = sShare[i] ^ rShare[i];
+            const u8 want = input[rho[i]];
+            if (got != want) {
+                cout << "correlated mismatch at " << i << endl;
+                throw RTE_LOC;
+            }
+        }
+        if (cmd.isSet("v")) {
+            const double MB = 1024 * 1024;
+            const u64 tot = socket2[0].bytesSent() + socket2[1].bytesSent();
+            cout << "correlated form: offline " << corrBytes / MB
+                 << " MB + online " << (tot - corrBytes) / MB << " MB" << endl;
+        }
+    }
+
     if (cmd.isSet("v")) {
         const double MB = 1024 * 1024;
         const u64 total = socket[0].bytesSent() + socket[1].bytesSent();

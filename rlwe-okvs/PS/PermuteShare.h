@@ -30,6 +30,21 @@ namespace rlweOkvs
     // n/2 switches each. One OT per switch.
     oc::u64 permuteShareSwitchCount(oc::u64 n);
 
+    // Correlated permutation, the whole thing precomputed.
+    //
+    // The permutation is sampled at random in the offline phase and the entire
+    // permute + share is run there on a random vector r held by the receiver:
+    // the receiver keeps a, the sender b, with a ^ b = rho(r). Online the
+    // receiver only sends d = x ^ r and the sender applies rho locally, since
+    // rho(d) ^ b = rho(x) ^ a. So the switch OTs, the Benes routing and both
+    // network evaluations all leave the online phase.
+    //
+    // A caller that needs a *specific* permutation cannot use this. The PSU
+    // can: all it needs is for the layout position of an item to be hidden, so
+    // the sender looks up where rho sent each of its slots and runs the final
+    // OT there -- from the receiver's side those positions are a uniformly
+    // random subset.
+
     // Holds the permutation. It is the OT *receiver*: the choice bit of switch
     // i is that switch's setting, so the offline OTs are taken with random
     // choices and corrected online.
@@ -43,6 +58,7 @@ namespace rlweOkvs
         // the offline material at 2 bits/switch instead of a 16-byte block.
         std::vector<oc::u8> mRotBits;
         oc::BitVector mRotChoices;
+        oc::BitVector mCorrShare;   // share of rho(r) from correlate()
 
     public:
         // Sizes only, so the offline phase can run before the permutation is
@@ -52,14 +68,27 @@ namespace rlweOkvs
         // Offline: the switch OTs. Depends only on n.
         Proto setup(oc::SilentOtExtReceiver& ot, oc::PRNG& prng, Socket& chl);
 
-        // Routes the Benes network for this permutation. Online.
+        // Routes the Benes network for this permutation.
         void setPermutation(std::vector<int> perm);
 
-        // Online: outputs this party's share of pi(x).
+        // Outputs this party's share of pi(x), where x is the receiver's
+        // input to the matching call.
         Proto run(oc::BitVector& share, Socket& chl);
 
+        // Offline: samples a random permutation, runs the protocol against the
+        // receiver's random vector and keeps the resulting share. Leaves the
+        // permutation available through getPerm().
+        Proto correlate(oc::SilentOtExtReceiver& ot, oc::PRNG& prng,
+            Socket& chl);
+
+        // Online: the receiver's blinded input d = x ^ r maps to
+        // rho(d) ^ (offline share) = rho(x) ^ (receiver's offline share).
+        Proto apply(oc::BitVector& share, Socket& chl);
+
         std::vector<int> getPerm() { return mBenes.getPerm(); };
+        const std::vector<int>& getPermRef() { return mBenes.getPermRef(); };
         std::vector<int> getInvPerm() { return mBenes.getInvPerm(); };
+        const std::vector<int>& getInvPermRef() { return mBenes.getInvPermRef(); };
     };
 
     // Holds the input vector. It is the OT *sender*.
@@ -70,6 +99,8 @@ namespace rlweOkvs
         // Four bits per switch: for each of the two OT messages, the pair of
         // bits the two wires of that switch consume.
         std::vector<std::array<std::array<oc::u8, 2>, 2>> mSotMsgs;
+        oc::BitVector mCorrR;       // the random vector r
+        oc::BitVector mCorrShare;   // share of rho(r) from correlate()
 
         void prepareCorrection(oc::u64 depth, oc::u64 permIdx,
             oc::BitVector& src,
@@ -82,8 +113,17 @@ namespace rlweOkvs
         // Offline: the switch OTs. Depends only on n.
         Proto setup(oc::SilentOtExtSender& ot, oc::PRNG& prng, Socket& chl);
 
-        // Online: outputs this party's share of pi(inputs).
+        // Outputs this party's share of pi(inputs).
         Proto run(const oc::BitVector& inputs, oc::BitVector& outputs,
             oc::PRNG& prng, Socket& chl);
+
+        // Offline half of the correlation: picks the random vector r and keeps
+        // the share of rho(r).
+        Proto correlate(oc::SilentOtExtSender& ot, oc::PRNG& prng, Socket& chl);
+
+        // Online: sends x ^ r and returns the offline share, which is this
+        // party's share of rho(x).
+        Proto apply(const oc::BitVector& inputs, oc::BitVector& outputs,
+            Socket& chl);
     };
 }

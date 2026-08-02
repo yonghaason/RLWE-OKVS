@@ -110,12 +110,13 @@ Proto PsuSender::setup(Socket &chl)
     sspmtSender.setTimer(getTimer());
     co_await sspmtSender.setup(chl);
 
-    // Permute + share over the whole layout, so its switch OTs are sized by
-    // the (public) layout; the permutation itself only arrives online.
+    // The whole permute + share is precomputed against a random permutation:
+    // switch OTs, routing and both network evaluations. Online it costs one
+    // blinded vector and a local permutation.
     const u64 nSlots = sspmtSender.getLayoutSize();
     psSender.setTimer(getTimer());
     psSender.init(nSlots);
-    co_await psSender.setup(otSwitchReceiver, mPrng, chl);
+    co_await psSender.correlate(otSwitchReceiver, mPrng, chl);
 
     // The transfer runs over item indices now, not slots, so n_y OTs suffice.
     co_await genRotSender(otSender, mPrng, chl, mN, mRot);
@@ -136,10 +137,14 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
 
     auto comm = chl.bytesSent() + chl.bytesReceived();
 
-    // Output j of the permutation is the slot of item order[j], with `order` a
-    // fresh random permutation of the items: the receiver sees which OT
-    // indices carried a new element, so that index must not be the sender's
-    // own item order. The rest of the outputs take the remaining slots.
+    // The permutation was fixed offline and at random, so instead of routing
+    // one that puts our items first, we look up where it sent their slots.
+    // Those positions are a uniformly random injection from the receiver's
+    // point of view, so naming them reveals nothing.
+    //
+    // The item order still has to be randomized: the receiver does see which
+    // OT index carried a new element, and that index must not be our input
+    // order, or the pattern of matched items leaks by rank.
     std::vector<int> itemToSlot(mN, -1);
     for (u64 s = 0; s < nSlots; ++s) {
         if (slotToItem[s] != UINT32_MAX) itemToSlot[slotToItem[s]] = (int)s;
@@ -148,33 +153,21 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
     std::iota(order.begin(), order.end(), 0u);
     for (u64 i = mN - 1; i > 0; --i) std::swap(order[i], order[mPrng.get<u64>() % (i + 1)]);
 
-    std::vector<int> perm(nSlots);
-    std::vector<u8> used(nSlots, 0);
-    for (u64 j = 0; j < mN; ++j) {
-        perm[j] = itemToSlot[order[j]];
-        used[perm[j]] = 1;
-    }
-    {
-        u64 next = mN;
-        for (u64 s = 0; s < nSlots; ++s)
-            if (!used[s]) perm[next++] = (int)s;
-    }
-    // Keep the slots our own items landed in; the permutation itself is moved
-    // into the Benes routing and getPerm() would hand back a full copy.
-    std::vector<uint32_t> itemSlots(perm.begin(), perm.begin() + mN);
-    psSender.setPermutation(std::move(perm));
-
-    // After this, share[j] ^ (receiver's share)[j] is the membership bit of
-    // the receiver's ss-PMT share at slot perm[j].
     BitVector psShare;
-    co_await psSender.run(psShare, chl);
+    co_await psSender.apply(psShare, chl);
 
-    // Fold in this party's own ss-PMT share at the same slots to get shares of
-    // the membership bits themselves, in item order.
+    const auto &invPerm = psSender.getInvPermRef();
+    std::vector<u32> positions(mN);
     BitVector bits(mN);
     for (u64 j = 0; j < mN; ++j) {
-        bits[j] = psShare[j] ^ sspmt[itemSlots[j]];
+        const u32 slot = (u32)itemToSlot[order[j]];
+        const u32 p = (u32)invPerm[slot];
+        positions[j] = p;
+        // psShare[p] ^ (receiver's share)[p] is the membership bit at `slot`;
+        // fold in our own ss-PMT share of that slot.
+        bits[j] = psShare[p] ^ sspmt[slot];
     }
+    co_await chl.send(coproto::copy(positions));
 
     BitVector flip(mN);
     co_await chl.recv(flip);
@@ -207,7 +200,7 @@ Proto PsuReceiver::setup(Socket &chl)
     const u64 nSlots = sspmtReceiver.getLayoutSize();
     psReceiver.setTimer(getTimer());
     psReceiver.init(nSlots);
-    co_await psReceiver.setup(otSwitchSender, mPrng, chl);
+    co_await psReceiver.correlate(otSwitchSender, mPrng, chl);
 
     co_await genRotReceiver(otReceiver, mPrng, chl, mNother, mRot);
     setTimePoint("PsuReceiver::Setup (transfer OTs)");
@@ -223,14 +216,16 @@ Proto PsuReceiver::run(const std::vector<oc::block> &X,
     BitVector sspmt;
     co_await sspmtReceiver.run(X, sspmt, chl);
 
-    // Hand the per-slot shares through permute + share; the sender's
-    // permutation brings its items' slots to the front, in a random order it
-    // alone knows.
+    // Permute + share, precomputed offline against a permutation only the
+    // sender knows; here it is one blinded vector.
     BitVector psShare;
-    co_await psReceiver.run(sspmt, psShare, mPrng, chl);
+    co_await psReceiver.apply(sspmt, psShare, chl);
+
+    std::vector<u32> positions;
+    co_await chl.recvResize(positions);
 
     BitVector bits(mNother);
-    for (u64 j = 0; j < mNother; ++j) bits[j] = psShare[j];
+    for (u64 j = 0; j < mNother; ++j) bits[j] = psShare[positions[j]];
 
     BitVector flip(mNother);
     for (u64 j = 0; j < mNother; ++j) flip[j] = mRot.mChoices[j] ^ bits[j];

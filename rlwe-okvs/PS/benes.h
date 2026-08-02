@@ -41,7 +41,9 @@ public:
 	oc::BitVector getSwitchesAsBitVec();
 
 	std::vector<int> getPerm() {return mPerm;};
+	const std::vector<int>& getPermRef() const {return mPerm;};
 	std::vector<int> getInvPerm() {return mInvPerm;};
+	const std::vector<int>& getInvPermRef() const {return mInvPerm;};
 };
 
 }  // namespace rlweOkvs

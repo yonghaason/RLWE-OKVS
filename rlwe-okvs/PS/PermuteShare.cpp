@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <numeric>
 
 #include "cryptoTools/Crypto/AES.h"
 
@@ -65,7 +66,9 @@ Proto PermuteShareSender::setup(SilentOtExtReceiver &ot, PRNG &prng,
 
 Proto PermuteShareSender::run(BitVector &share, Socket &chl) {
   // Steer each OT onto this switch's actual setting.
+  setTimePoint("PS.S: online begin");
   BitVector switches = mBenes.getSwitchesAsBitVec();
+  setTimePoint("PS.S: switches as bitvec");
   BitVector bitCorrection = switches;
   bitCorrection ^= mRotChoices;
   co_await chl.send(bitCorrection);
@@ -75,6 +78,7 @@ Proto PermuteShareSender::run(BitVector &share, Socket &chl) {
   recvCorr[1].resize(mNumSwitches);
   co_await chl.recv(recvCorr[0]);
   co_await chl.recv(recvCorr[1]);
+  setTimePoint("PS.S: recv corrections");
 
   std::vector<std::array<u8, 2>> recvMsg(mNumSwitches);
   for (u64 i = 0; i < mNumSwitches; ++i) {
@@ -86,6 +90,8 @@ Proto PermuteShareSender::run(BitVector &share, Socket &chl) {
     recvMsg[i] = {a, b};
   }
 
+  setTimePoint("PS.S: apply corrections");
+
   share.resize(mN);
   co_await chl.recv(share);
 
@@ -95,8 +101,40 @@ Proto PermuteShareSender::run(BitVector &share, Socket &chl) {
     matrix[i].resize(mN);
     for (u64 j = 0; j < mN / 2; ++j) matrix[i][j] = recvMsg[ctr++];
   }
+  setTimePoint("PS.S: build matrix");
   mBenes.benesMaskedEval(share, matrix);
-  setTimePoint("PermuteShareSender::Online");
+  setTimePoint("PS.S: masked eval");
+}
+
+
+Proto PermuteShareSender::correlate(SilentOtExtReceiver &ot, PRNG &prng,
+                                    Socket &chl) {
+  co_await setup(ot, prng, chl);
+
+  // A random permutation is as good as any: the caller only needs positions
+  // hidden, and it can look up where rho sent each of them afterwards.
+  std::vector<int> perm(mN);
+  std::iota(perm.begin(), perm.end(), 0);
+  for (u64 i = mN - 1; i > 0; --i) {
+    std::swap(perm[i], perm[prng.get<u64>() % (i + 1)]);
+  }
+  setPermutation(std::move(perm));
+
+  co_await run(mCorrShare, chl);
+  setTimePoint("PermuteShareSender::Correlate");
+}
+
+Proto PermuteShareSender::apply(BitVector &share, Socket &chl) {
+  BitVector d(mN);
+  co_await chl.recv(d);
+
+  // rho(d) ^ b = rho(x) ^ rho(r) ^ b = rho(x) ^ a.
+  const auto &perm = mBenes.getPermRef();
+  share.resize(mN);
+  for (u64 i = 0; i < mN; ++i) {
+    share[i] = d[perm[i]] ^ mCorrShare[i];
+  }
+  setTimePoint("PermuteShareSender::Apply");
 }
 
 // -------------------------------------------------------------- receiver ---
@@ -132,8 +170,10 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
   masks.randomize(prng);
   outputs = masks;  // the input-side masks; permuted in place below
 
+  setTimePoint("PS.R: online begin");
   BitVector bitCorrection(mNumSwitches);
   co_await chl.recv(bitCorrection);
+  setTimePoint("PS.R: recv bitcorrection");
 
   // Swap the message pair wherever the sender's switch disagreed with the
   // random choice bit of the offline OT.
@@ -142,9 +182,12 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
     if (bitCorrection[i]) std::swap(sot[i][0], sot[i][1]);
   }
 
+  setTimePoint("PS.R: copy+swap sot");
+
   std::vector<std::array<u8, 2>> corrections(mNumSwitches);
   BitVector permuted = masks;
   prepareCorrection(0, 0, permuted, sot, corrections);
+  setTimePoint("PS.R: prepare corrections");
 
   std::vector<BitVector> corrBits(2);
   corrBits[0].resize(mNumSwitches);
@@ -153,6 +196,7 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
     corrBits[0][i] = corrections[i][0];
     corrBits[1][i] = corrections[i][1];
   }
+  setTimePoint("PS.R: pack corrections");
   co_await chl.send(corrBits[0]);
   co_await chl.send(corrBits[1]);
 
@@ -350,4 +394,24 @@ Proto PermuteShareReceiver::run(const BitVector &inputs, BitVector &outputs,
       src[subNetSize - 1] = top1[idx - 1];
     }
   }
+
+Proto PermuteShareReceiver::correlate(SilentOtExtSender &ot, PRNG &prng,
+                                      Socket &chl) {
+  co_await setup(ot, prng, chl);
+
+  mCorrR.resize(mN);
+  mCorrR.randomize(prng);
+  co_await run(mCorrR, mCorrShare, prng, chl);
+  setTimePoint("PermuteShareReceiver::Correlate");
+}
+
+Proto PermuteShareReceiver::apply(const BitVector &inputs, BitVector &outputs,
+                                  Socket &chl) {
+  BitVector d = mCorrR;
+  d ^= inputs;
+  co_await chl.send(d);
+  outputs = mCorrShare;
+  setTimePoint("PermuteShareReceiver::Apply");
+}
+
 }  // namespace rlweOkvs
