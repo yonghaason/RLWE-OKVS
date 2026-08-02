@@ -68,33 +68,37 @@ namespace rlweOkvs
         // is set to bring every key-level modulus -- the largest one any
         // published sample lives at, once the public key is transmitted for
         // re-randomization -- to 218 bits, the 128-bit bound for N = 8192.
+        // (bandExpansion, bandWidth) is a point on that size's OKVS width fit
+        // (log/okvs_nn*_probe_fit.tsv, extrapolated to 2^-40); span_blocks
+        // trades a wider per-layer decode against a smaller layer budget.
+        // Chosen by sweeping the two jointly per size against PSI-Card: span
+        // is the dominant knob, since it takes both the returned ciphertexts
+        // and the GMW instances down with the budget, and once it is large the
+        // budget sits near its floor whatever the expansion -- which is why
+        // the expansion then matters only through the forward ciphertext
+        // count b + w - 1.
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
                     floodBits = 48;
                     heCoeffModulus = {50, 58, 60, 50};
                     hePlainModulusBits = 56;
-                    bandWidth = 28;
-                    bandExpansion = 2.3;
-                    span_blocks = 9;
+                    bandWidth = 29;
+                    bandExpansion = 2.1;
+                    span_blocks = 40;
                     break;
                 case (1ull << 18):
                     floodBits = 50;
                     heCoeffModulus = {54, 58, 60, 46};
                     hePlainModulusBits = 58;
-                    bandWidth = 28;
-                    bandExpansion = 2.2;
-                    span_blocks = 13;
+                    bandWidth = 43;
+                    bandExpansion = 1.7;
+                    span_blocks = 50;
                     break;
                 case (1ull << 20):
                     floodBits = 52;
                     heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
-                    // (m/n, w) is a point on the OKVS width fit (log/okvs_nn20
-                    // _probe_fit.tsv); span_blocks trades the per-layer decode
-                    // against the layer budget. Swept jointly at this size:
-                    // this is the balance, within 2% of both the time-optimal
-                    // and the communication-optimal corner.
                     bandWidth = 44;
                     bandExpansion = 1.7;
                     span_blocks = 60;
@@ -103,9 +107,9 @@ namespace rlweOkvs
                     floodBits = 52;
                     heCoeffModulus = {60, 60, 60, 38};
                     hePlainModulusBits = 60;
-                    bandWidth = 45;
+                    bandWidth = 46;
                     bandExpansion = 1.7;
-                    span_blocks = 30;
+                    span_blocks = 120;
                     break;
                 default:
                     heCoeffModulus = {58, 58, 60, 42};
