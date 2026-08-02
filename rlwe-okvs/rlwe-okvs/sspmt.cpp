@@ -833,6 +833,20 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
   const u64 keyBitLength = 40 + oc::log2ceil(mNsender);
   const u64 keyByteLength = oc::divCeil(keyBitLength, 8);
 
+  // How much room is left for the noise flooding that re-randomization will
+  // need: the returned ciphertexts must still decrypt after e_flood is added,
+  // so the smallest budget here is the ceiling on log2(e_flood / e_compute).
+  {
+    int minBudget = INT32_MAX, maxBudget = 0;
+    for (size_t i = 0; i < mLayerBudget; ++i) {
+      const int budget = mDecryptor->invariant_noise_budget(decoded_in_he[i]);
+      minBudget = std::min(minBudget, budget);
+      maxBudget = std::max(maxBudget, budget);
+    }
+    cout << "Return noise budget: " << minBudget << " - " << maxBudget
+         << " bits" << endl;
+  }
+
   oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
   vector<uint64_t> decodeVec(mNumSlots);
   Plaintext ptxt;

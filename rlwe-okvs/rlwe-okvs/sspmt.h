@@ -72,7 +72,14 @@ namespace rlweOkvs
                     span_blocks = 13;
                     break;
                 case (1ull << 20):
-                    heCoeffModulus = {58, 58, 60, 50};
+                    // {fresh-level primes..., special}. The special prime is
+                    // only consumed by key switching, which this protocol
+                    // never does (no relinearization, no rotation), so it is
+                    // sized purely to keep the key-level modulus -- the
+                    // largest one any published sample lives at, once the
+                    // public key is transmitted for re-randomization -- at
+                    // 218 bits, the 128-bit bound for N = 8192.
+                    heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
                     bandWidth = 31;
                     bandExpansion = 2.1;
