@@ -8,6 +8,8 @@ set(SRCS
     "GMW/Circuit.cpp"
     "GMW/Gmw.cpp"
     "GMW/SilentTripleGen.cpp"
+    "PS/benes.cpp"
+    "PS/PermuteShare.cpp"
     "pso.cpp"
 )
 

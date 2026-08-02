@@ -1,6 +1,7 @@
 #include "pso.h"
 
 #include <memory>
+#include <numeric>
 #include <set>
 
 #include "GMW/Gmw.h"
@@ -109,10 +110,15 @@ Proto PsuSender::setup(Socket &chl)
     sspmtSender.setTimer(getTimer());
     co_await sspmtSender.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
+    // Permute + share over the whole layout, so its switch OTs are sized by
+    // the (public) layout; the permutation itself only arrives online.
     const u64 nSlots = sspmtSender.getLayoutSize();
-    co_await genRotSender(otSender, mPrng, chl, nSlots, mRot);
+    psSender.setTimer(getTimer());
+    psSender.init(nSlots);
+    co_await psSender.setup(otSwitchReceiver, mPrng, chl);
+
+    // The transfer runs over item indices now, not slots, so n_y OTs suffice.
+    co_await genRotSender(otSender, mPrng, chl, mN, mRot);
     setTimePoint("PsuSender::Setup (transfer OTs)");
 
     mSetupDone = true;
@@ -130,25 +136,58 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
 
     auto comm = chl.bytesSent() + chl.bytesReceived();
 
-    // Orient the offline OTs onto the receiver's actual choice bits.
-    BitVector flip(nSlots);
+    // Output j of the permutation is the slot of item order[j], with `order` a
+    // fresh random permutation of the items: the receiver sees which OT
+    // indices carried a new element, so that index must not be the sender's
+    // own item order. The rest of the outputs take the remaining slots.
+    std::vector<int> itemToSlot(mN, -1);
+    for (u64 s = 0; s < nSlots; ++s) {
+        if (slotToItem[s] != UINT32_MAX) itemToSlot[slotToItem[s]] = (int)s;
+    }
+    std::vector<u32> order(mN);
+    std::iota(order.begin(), order.end(), 0u);
+    for (u64 i = mN - 1; i > 0; --i) std::swap(order[i], order[mPrng.get<u64>() % (i + 1)]);
+
+    std::vector<int> perm(nSlots);
+    std::vector<u8> used(nSlots, 0);
+    for (u64 j = 0; j < mN; ++j) {
+        perm[j] = itemToSlot[order[j]];
+        used[perm[j]] = 1;
+    }
+    {
+        u64 next = mN;
+        for (u64 s = 0; s < nSlots; ++s)
+            if (!used[s]) perm[next++] = (int)s;
+    }
+    psSender.setPermutation(std::move(perm));
+
+    // After this, share[j] ^ (receiver's share)[j] is the membership bit of
+    // the receiver's ss-PMT share at slot perm[j].
+    BitVector psShare;
+    co_await psSender.run(psShare, chl);
+
+    // Fold in this party's own ss-PMT share at the same slots to get shares of
+    // the membership bits themselves, in item order.
+    BitVector bits(mN);
+    for (u64 j = 0; j < mN; ++j) {
+        bits[j] = psShare[j] ^ sspmt[psSender.getPerm()[j]];
+    }
+
+    BitVector flip(mN);
     co_await chl.recv(flip);
 
     // Send only the message the receiver recovers when the shares agree; if
-    // they disagree it xors with the other pad and gets garbage. Empty slots
-    // carry garbage too, which the receiver drops by the same test.
-    vector<block> otp(nSlots);
-    for (u64 s = 0; s < nSlots; s++) {
-        const uint32_t item = slotToItem[s];
-        const block payload = (item == UINT32_MAX) ? mPrng.get<block>() : Y[item];
-        const bool swap = flip[s];
-        otp[s] = mRot.mSend[s][(sspmt[s] ^ swap) ? 1 : 0] ^ payload;
+    // they disagree it xors with the other pad and gets garbage.
+    vector<block> otp(mN);
+    for (u64 j = 0; j < mN; j++) {
+        const bool swap = flip[j];
+        otp[j] = mRot.mSend[j][(bits[j] ^ swap) ? 1 : 0] ^ Y[order[j]];
     }
 
     co_await chl.send(std::move(otp));
 
     comm = chl.bytesSent() + chl.bytesReceived() - comm;
-    cout << "FinalOT(PSU) takes " << comm << " bytes" << endl;
+    cout << "PermuteShare + FinalOT(PSU) takes " << comm << " bytes" << endl;
 
     setTimePoint("Sender::Final OT PSU");
 };
@@ -162,10 +201,12 @@ Proto PsuReceiver::setup(Socket &chl)
     sspmtReceiver.setTimer(getTimer());
     co_await sspmtReceiver.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtReceiver.getLayoutSize();
-    co_await genRotReceiver(otReceiver, mPrng, chl, nSlots, mRot);
+    psReceiver.setTimer(getTimer());
+    psReceiver.init(nSlots);
+    co_await psReceiver.setup(otSwitchSender, mPrng, chl);
+
+    co_await genRotReceiver(otReceiver, mPrng, chl, mNother, mRot);
     setTimePoint("PsuReceiver::Setup (transfer OTs)");
 
     mSetupDone = true;
@@ -179,10 +220,17 @@ Proto PsuReceiver::run(const std::vector<oc::block> &X,
     BitVector sspmt;
     co_await sspmtReceiver.run(X, sspmt, chl);
 
-    BitVector flip(sspmt.size());
-    for (u64 s = 0; s < sspmt.size(); ++s) {
-        flip[s] = mRot.mChoices[s] ^ sspmt[s];
-    }
+    // Hand the per-slot shares through permute + share; the sender's
+    // permutation brings its items' slots to the front, in a random order it
+    // alone knows.
+    BitVector psShare;
+    co_await psReceiver.run(sspmt, psShare, mPrng, chl);
+
+    BitVector bits(mNother);
+    for (u64 j = 0; j < mNother; ++j) bits[j] = psShare[j];
+
+    BitVector flip(mNother);
+    for (u64 j = 0; j < mNother; ++j) flip[j] = mRot.mChoices[j] ^ bits[j];
     co_await chl.send(flip);
 
     vector<block> otp;

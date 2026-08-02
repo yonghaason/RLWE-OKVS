@@ -7,6 +7,7 @@
 #include "cryptoTools/Network/Channel.h"
 #include "coproto/coproto.h"
 #include "rlwe-okvs/sspmt.h"
+#include "PS/PermuteShare.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "seal/seal.h"
@@ -80,19 +81,22 @@ namespace rlweOkvs
         RotStore mRot;
     };
 
-    // Private set union. The sender transfers, per layout slot, either the
-    // item sitting there or garbage, so the receiver ends up with Y \ X.
+    // Private set union.
     //
-    // NOTE: unlike the other operations below, this one exposes the layout
-    // position of every transferred element. The receiver can hash its own
-    // items to slot columns, so those positions -- not the membership bits --
-    // are what a Chandran-style analysis attacks. Closing it needs the
-    // transfer to be indexed by sender-item order rather than by slot, i.e. a
-    // permute+share step on the membership shares before the OT.
+    // The transfer cannot be indexed by layout slot: the receiver hashes its
+    // own items to slot columns, so seeing which slot an element arrived from
+    // is what a Chandran-style analysis attacks -- the membership bits
+    // themselves are not the problem. Permute + share fixes the indexing. The
+    // sender picks a permutation whose first n_y outputs are the slots of its
+    // items, in a random item order; after F_PS the two parties hold shares of
+    // the membership bits in *that* order, so the final OT runs over item
+    // indices and no slot is ever named.
     class PsuSender : public PsoBase
     {
         SspmtSender sspmtSender;
         oc::SilentOtExtSender otSender;
+        oc::SilentOtExtReceiver otSwitchReceiver;  // permute+share switches
+        PermuteShareSender psSender;
 
     public:
         // Offline phase: the ss-PMT's input-independent correlated randomness.
@@ -106,6 +110,8 @@ namespace rlweOkvs
     {
         SspmtReceiver sspmtReceiver;
         oc::SilentOtExtReceiver otReceiver;
+        oc::SilentOtExtSender otSwitchSender;      // permute+share switches
+        PermuteShareReceiver psReceiver;
 
     public:
         // Offline phase: the ss-PMT's input-independent correlated randomness.

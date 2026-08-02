@@ -7,6 +7,7 @@ set(SRCS
     PSO_tests.cpp
     GMW_tests.cpp
     SEQ_tests.cpp
+    PS_tests.cpp
     UnitTests.cpp
 )
 
