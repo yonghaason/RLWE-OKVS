@@ -86,6 +86,8 @@ namespace rlweOkvs
 
         std::vector<int> getPerm() { return mBenes.getPerm(); };
         const std::vector<int>& getPermRef() { return mBenes.getPermRef(); };
+        // Switch 0 of column 0; structurally zero (see the Waksman note).
+        oc::u8 firstSwitch() { return mBenes.getSwitchesAsBitVec()[0]; };
         std::vector<int> getInvPerm() { return mBenes.getInvPerm(); };
         const std::vector<int>& getInvPermRef() { return mBenes.getInvPermRef(); };
     };

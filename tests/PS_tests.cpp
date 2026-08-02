@@ -76,6 +76,23 @@ void permute_share_test(const oc::CLP& cmd)
 
     sender.setPermutation(perm);
 
+    // Waksman check: the routing seeds its DFS at wire 0 with route 0, so the
+    // first switch of every even-sized sub-network is forced to 0 -- these are
+    // exactly the switches a Waksman network drops. Verified here for the top
+    // level, over several permutations.
+    for (u64 t = 0; t < 8; ++t) {
+        std::vector<int> p2(n);
+        std::iota(p2.begin(), p2.end(), 0);
+        for (u64 i = n - 1; i > 0; --i) std::swap(p2[i], p2[prng.get<u64>() % (i + 1)]);
+        PermuteShareSender probe;
+        probe.init(n);
+        probe.setPermutation(p2);
+        if (probe.firstSwitch() != 0) {
+            cout << "first switch not structurally zero" << endl;
+            throw RTE_LOC;
+        }
+    }
+
     BitVector senderShare, receiverShare;
     runBoth(sender.run(senderShare, socket[0]),
             receiver.run(input, receiverShare, prngR, socket[1]));
