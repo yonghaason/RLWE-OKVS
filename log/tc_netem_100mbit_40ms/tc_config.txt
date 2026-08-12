@@ -1,1 +1,0 @@
-qdisc netem 804c: root refcnt 2 limit 1000 delay 40ms rate 100Mbit
