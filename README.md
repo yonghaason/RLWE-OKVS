@@ -1,4 +1,4 @@
-### Build and Run
+### Build
 
 The library can be cloned and built with networking support as follows.
 
@@ -11,8 +11,7 @@ cmake -S . -B build \
 cmake --build build
 cmake --install build
 cd ../libOTe
-sudo apt install libtool
-python3 build.py --all --boost --sodium -DENABLE_CIRCUITS=ON --install=../install/libOTe
+python3 build.py --all --boost --sodium -DENABLE_CIRCUITS=ON -DENABLE_LOGVOLE=OFF --install=../install/libOTe
 cd ../xxHash
 make -j
 cd ../..
@@ -22,20 +21,32 @@ cmake --build build
 
 This generates the `run` executable in the `build` directory.
 
-### Running Tests
+### Running Benchmark
 
-To see the currently registered implementations, run:
-
-```bash
-./run -list
-```
-
-You can run each test by running `run -u <index>`. 
-
-For example, to run RPMT-based PSU with set size `n = 2^20`:
+| index | protocol |
+|---|---|
+| 1 | ssPMT |
+| 2 | PSU |
+| 3 | PSI-Card |
+| 4 | PSI-Sum |
+| 5 | PSI-Threshold |
 
 ```bash
-./run -u 2 -nn 20 -v
+sudo ./benchmark.sh [experiment idx] -nn [logn] -bw [bandwidth] -v
 ```
 
-(-v is for printing underlying parameters, timings, and communications.)
+This runs the chosen protocol with set size `n = 2^logn`, one party per
+process, connected by an emulated WAN link (created automatically and
+removed when the run finishes).
+
+- `-bw` sets the per-direction bandwidth, e.g. `100mbit`, `1gbit`, `10gbit`
+  (default `10gbit`). Above 1 Gbit the link latency is 0.1 ms; at or below
+  1 Gbit it is 80 ms.
+- `-v` is verbose: prints the underlying parameters, timings, and
+  communication.
+
+For example, PSU with `n = 2^20` over a 100 Mbit WAN:
+
+```bash
+sudo ./benchmark.sh 2 -nn 20 -bw 100mbit -v
+```

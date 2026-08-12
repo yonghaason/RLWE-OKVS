@@ -1,13 +1,21 @@
 #include "sspmt.h"
 
+#include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <memory>
+#include <numeric>
 #include <set>
+#include <utility>
 
 #include "../GMW/Gmw.h"
 #include "okvs.h"
 #include "seal/util/numth.h"
+#include "seal/util/ntt.h"
+#include "seal/util/polyarithsmallmod.h"
 #include "seal/util/uintarithsmallmod.h"
+
+#include "macoro/when_all.h"
 
 using namespace std;
 using namespace seal;
@@ -53,6 +61,33 @@ uint32_t activeWrapCountForBatch(uint32_t j, uint32_t numBatch, uint32_t width,
   return wraps;
 }
 
+// log P[Bin(n, p) >= k], summed term by term in log space. Exact up to the
+// truncation of terms more than e^-80 below the largest one (a relative error
+// below 2e-35), which is far tighter than the 2^-70-ish levels we test.
+double logBinomUpperTail(uint64_t n, double logP, double logQ, double lgn1,
+                         uint64_t k, double mean) {
+  if (k == 0) return 0.0;
+  if (k > n) return -std::numeric_limits<double>::infinity();
+
+  double maxLog = -std::numeric_limits<double>::infinity();
+  double sum = 0.0;
+  for (uint64_t j = k; j <= n; ++j) {
+    const double l = lgn1 - std::lgamma((double)j + 1.0) -
+                     std::lgamma((double)(n - j) + 1.0) + (double)j * logP +
+                     (double)(n - j) * logQ;
+    if (l > maxLog) {
+      sum = (maxLog == -std::numeric_limits<double>::infinity())
+                ? 1.0
+                : sum * std::exp(maxLog - l) + 1.0;
+      maxLog = l;
+    } else {
+      sum += std::exp(l - maxLog);
+    }
+    if ((double)j > mean && l < maxLog - 80.0) break;
+  }
+  return maxLog + std::log(sum);
+}
+
 uint64_t totalEncodedCipherCount(uint32_t numBatch, uint32_t width,
                                  uint32_t maxWrap) {
   uint64_t total = 0;
@@ -63,144 +98,321 @@ uint64_t totalEncodedCipherCount(uint32_t numBatch, uint32_t width,
 }
 }
 
-void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
-  std::vector<uint32_t> item_binidx(mN);
+uint32_t SspmtSender::sequenceLayers(const std::vector<uint32_t> &itemBin,
+                                     const std::vector<uint32_t> &itemBlock,
+                                     uint32_t numSlots, uint32_t spanBlocks,
+                                     std::vector<uint32_t> &itemToLayer,
+                                     std::vector<uint32_t> &layerMinBlock,
+                                     std::vector<uint32_t> &layerMaxBlock) {
+  const uint32_t n = static_cast<uint32_t>(itemBin.size());
+  itemToLayer.assign(n, UINT32_MAX);
+  layerMinBlock.clear();
+  layerMaxBlock.clear();
+  if (n == 0) {
+    return 0;
+  }
+
   uint32_t max_block = 0;
-
-  for (uint32_t i = 0; i < mN; ++i) {
-    uint32_t pos = start_pos_spacing[i];
-    uint32_t bin = pos % mNumSlots;
-    uint32_t blk = pos / mNumSlots;
-
-    item_binidx[i] = bin;
-    mItemToBlockIdx[i] = blk;
-    if (blk > max_block) max_block = blk;
+  for (uint32_t i = 0; i < n; ++i) {
+    max_block = std::max(max_block, itemBlock[i]);
   }
 
   std::vector<std::vector<uint32_t>> block_items(max_block + 1);
-  for (uint32_t i = 0; i < mN; ++i) {
-    block_items[mItemToBlockIdx[i]].push_back(i);
+  for (uint32_t i = 0; i < n; ++i) {
+    block_items[itemBlock[i]].push_back(i);
   }
 
-  struct Layer {
-    uint32_t min_block;
-    uint32_t max_block;
-    std::vector<uint8_t> used_bins;
-  };
-  std::vector<Layer> layers;
+  // Blocks are processed left to right, so a layer's min block is fixed at
+  // creation and span admissibility is purely "min_block + spanBlocks > blk".
+  // Layers are created with nondecreasing min block; the admissible ones form
+  // a suffix [firstActive, end), and scanning it in order is exactly
+  // "smallest anchor first" (earliest-expiring first).
+  std::vector<std::vector<uint8_t>> used_bins;
+  uint32_t firstActive = 0;
 
   for (uint32_t blk = 0; blk <= max_block; ++blk) {
-    auto &bucket = block_items[blk];
-    for (uint32_t idx : bucket) {
-      uint32_t r = item_binidx[idx];      // bin (residue)
-      uint32_t j = mItemToBlockIdx[idx];  // block
+    while (firstActive < layerMinBlock.size() &&
+           layerMinBlock[firstActive] + spanBlocks <= blk) {
+      ++firstActive;
+    }
+    for (uint32_t idx : block_items[blk]) {
+      const uint32_t r = itemBin[idx];
       bool placed = false;
-      for (uint32_t li = 0; li < layers.size(); ++li) {
-        Layer &L = layers[li];
-
-        if (L.used_bins[r]) {
+      for (uint32_t li = firstActive; li < used_bins.size(); ++li) {
+        if (used_bins[li][r]) {
           continue;
         }
-
-        uint32_t new_min = std::min(L.min_block, j);
-        uint32_t new_max = std::max(L.max_block, j);
-        uint32_t span = new_max - new_min + 1;
-
-        if (span <= mSpanBlocks) {
-          if (L.used_bins.empty()) {
-            L.used_bins.assign(mNumSlots, 0);
-          }
-          L.used_bins[r] = 1;
-          L.min_block = new_min;
-          L.max_block = new_max;
-          mItemToLayerIdx[idx] = li;
-          placed = true;
-          break;
-        }
+        used_bins[li][r] = 1;
+        layerMaxBlock[li] = blk;
+        itemToLayer[idx] = li;
+        placed = true;
+        break;
       }
-
       if (!placed) {
-        Layer nl;
-        nl.min_block = j;
-        nl.max_block = j;
-        nl.used_bins.assign(mNumSlots, 0);
-        nl.used_bins[r] = 1;
-        layers.push_back(std::move(nl));
-        mItemToLayerIdx[idx] = layers.size() - 1;
+        used_bins.emplace_back(numSlots, 0);
+        used_bins.back()[r] = 1;
+        layerMinBlock.push_back(blk);
+        layerMaxBlock.push_back(blk);
+        itemToLayer[idx] = static_cast<uint32_t>(used_bins.size()) - 1;
       }
     }
   }
+  return static_cast<uint32_t>(used_bins.size());
+}
 
-  mNumLayers = layers.size();
+uint32_t SspmtSender::sequenceLayersOptimal(
+    const std::vector<uint32_t> &itemBin,
+    const std::vector<uint32_t> &itemBlock, uint32_t numSlots,
+    uint32_t numBlocks, uint32_t spanBlocks,
+    std::vector<uint32_t> &itemToLayer, std::vector<uint32_t> &layerMinBlock,
+    std::vector<uint32_t> &layerMaxBlock) {
+  const uint32_t n = static_cast<uint32_t>(itemBin.size());
+  itemToLayer.assign(n, UINT32_MAX);
+  layerMinBlock.clear();
+  layerMaxBlock.clear();
+  if (n == 0) {
+    return 0;
+  }
+  const uint32_t b = numBlocks;
+  const uint32_t z = std::max<uint32_t>(spanBlocks, 1);
+
+  std::vector<std::vector<uint32_t>> block_items(b);
+  for (uint32_t i = 0; i < n; ++i) {
+    block_items[itemBlock[i]].push_back(i);
+  }
+
+  // --- Phase 1: how many windows, and where ---------------------------------
+  // cnt[x][bin] counts the items of that bin with block in [x, y] as y sweeps,
+  // and Mrun[x] = M([x, y]). pref[s] is the number of windows placed at starts
+  // <= s (final for s < y, since windows are only ever added at the current
+  // y). The supply reaching an interval [x, y] is total - pref[x-z], so the
+  // shortfall over all x is max_x (Mrun[x] + pref[x-z]) - total.
+  std::vector<std::vector<uint32_t>> cnt(b, std::vector<uint32_t>(numSlots, 0));
+  std::vector<uint32_t> Mrun(b, 0);
+  std::vector<uint64_t> pref(b, 0);
+  std::vector<uint32_t> anchors;
+  uint64_t total = 0;
+
+  for (uint32_t y = 0; y < b; ++y) {
+    for (uint32_t idx : block_items[y]) {
+      const uint32_t bin = itemBin[idx];
+      for (uint32_t x = 0; x <= y; ++x) {
+        const uint32_t c = ++cnt[x][bin];
+        if (c > Mrun[x]) {
+          Mrun[x] = c;
+        }
+      }
+    }
+
+    uint64_t need = 0;
+    for (uint32_t x = 0; x <= y; ++x) {
+      const uint64_t supplyBelow = (x >= z) ? pref[x - z] : 0;
+      need = std::max(need, (uint64_t)Mrun[x] + supplyBelow);
+    }
+    if (need > total) {
+      anchors.insert(anchors.end(), need - total, y);
+      total = need;
+    }
+    pref[y] = total;
+  }
+
+  // --- Phase 2: assign, leftmost admissible window first ---------------------
+  // Anchors are nondecreasing and each bin's items arrive in block order, so a
+  // single forward pointer per bin suffices: windows before it are either used
+  // by this bin or can no longer cover its remaining items.
+  const uint32_t L = static_cast<uint32_t>(anchors.size());
+  std::vector<uint32_t> ptr(numSlots, 0);
+  std::vector<uint32_t> lmin(L, UINT32_MAX), lmax(L, 0);
+
+  for (uint32_t y = 0; y < b; ++y) {
+    for (uint32_t idx : block_items[y]) {
+      const uint32_t bin = itemBin[idx];
+      uint32_t &p = ptr[bin];
+      const uint32_t lo = (y >= z - 1) ? (y - z + 1) : 0;
+      while (p < L && anchors[p] < lo) {
+        ++p;
+      }
+      if (p == L || anchors[p] > y) {
+        // Only reachable if a Hall constraint was violated, which phase 1
+        // rules out.
+        throw RTE_LOC;
+      }
+      itemToLayer[idx] = p;
+      lmin[p] = std::min(lmin[p], y);
+      lmax[p] = std::max(lmax[p], y);
+      ++p;
+    }
+  }
+
+  // --- Phase 3: drop the windows no item landed in --------------------------
+  std::vector<uint32_t> remap(L, UINT32_MAX);
+  uint32_t kept = 0;
+  for (uint32_t l = 0; l < L; ++l) {
+    if (lmin[l] != UINT32_MAX) {
+      remap[l] = kept++;
+      layerMinBlock.push_back(lmin[l]);
+      layerMaxBlock.push_back(lmax[l]);
+    }
+  }
+  for (uint32_t i = 0; i < n; ++i) {
+    itemToLayer[i] = remap[itemToLayer[i]];
+  }
+  return kept;
+}
+
+namespace {
+
+// caps[g-1] = D(g)+1, the per-bin item count a length-g block interval has to
+// be able to absorb. Empty when the parameters degenerate.
+std::vector<uint64_t> hallCaps(u64 n, uint32_t numSlots, uint64_t positionRange,
+                               uint32_t b, uint32_t lambda) {
+  std::vector<uint64_t> caps;
+  if (n == 0 || b == 0) {
+    return caps;
+  }
+  // One share of the 2^-lambda budget per (bin, start position, length)
+  // Hall constraint.
+  const double logEps = -(double)lambda * std::log(2.0) -
+                        std::log((double)numSlots) -
+                        2.0 * std::log((double)b);
+  const double lgn1 = std::lgamma((double)n + 1.0);
+
+  caps.resize(b);
+  uint64_t k = 0;  // D(g); nondecreasing in g, so the walk is amortized
+  for (uint32_t g = 1; g <= b; ++g) {
+    const double p = (double)g / (double)positionRange;
+    const double logP = std::log((double)g) - std::log((double)positionRange);
+    const double logQ = std::log1p(-p);
+    const double mean = (double)n * p;
+
+    while (logBinomUpperTail(n, logP, logQ, lgn1, k, mean) > logEps) {
+      ++k;
+    }
+    caps[g - 1] = k + 1;
+  }
+  return caps;
+}
+
+// A layer spans W blocks, so it can serve an item at block beta iff its start
+// lies in [beta-W+1, beta]: the starts that reach a length-g interval number
+// g+W-1, and the starts covering all b blocks number b+W-1. Hence
+// rho >= caps[g-1]/(g+W-1) for every g, and the window count is
+// ceil(rho * (b+W-1)); kept in integers to avoid rounding surprises.
+uint64_t budgetForSpan(const std::vector<uint64_t> &caps, uint32_t b,
+                       uint32_t W) {
+  uint64_t budget = 0;
+  for (uint32_t g = 1; g <= b; ++g) {
+    budget = std::max(budget, divCeil(caps[g - 1] * (uint64_t)(b + W - 1),
+                                      (uint64_t)(g + W - 1)));
+  }
+  return budget;
+}
+
+}  // namespace
+
+u32 sspmtParams::resolveSpanBlocks(u64 n) const {
+  if (span_blocks) {
+    return span_blocks;
+  }
+  const uint32_t numSlots = heNumSlots;
+  const uint64_t m = roundUpTo(bandExpansion * n, numSlots);
+  const uint32_t b = (uint32_t)(m / numSlots);
+  const auto caps = hallCaps(n, numSlots, m - bandWidth + 1, b,
+                             layerBudgetLambda);
+  if (caps.empty()) {
+    return 1;
+  }
+
+  // The g = b constraint is span-free, so caps.back() is the floor every span
+  // is measured against. Past W = b every window already covers every block,
+  // hence the search stops there.
+  const double floor = (double)caps.back();
+  std::vector<double> obj(b);
+  double best = std::numeric_limits<double>::max();
+  for (uint32_t W = 1; W <= b; ++W) {
+    obj[W - 1] = (double)budgetForSpan(caps, b, W) / floor + spanCostRatio * W;
+    best = std::min(best, obj[W - 1]);
+  }
+  // Communication keeps falling after the time optimum, so take the widest
+  // span still on the plateau.
+  uint32_t span = 1;
+  for (uint32_t W = 1; W <= b; ++W) {
+    if (obj[W - 1] <= best * (1.0 + spanTimeSlack)) {
+      span = W;
+    }
+  }
+  return span;
+}
+
+u32 sspmtParams::resolveLayerBudget(u64 n) const {
+  if (layerBudget) {
+    return layerBudget;
+  }
+  const uint32_t numSlots = heNumSlots;
+  const uint64_t m = roundUpTo(bandExpansion * n, numSlots);
+  const uint32_t b = (uint32_t)(m / numSlots);
+  const auto caps = hallCaps(n, numSlots, m - bandWidth + 1, b,
+                             layerBudgetLambda);
+  if (caps.empty()) {
+    return 0;
+  }
+  return (uint32_t)budgetForSpan(caps, b, resolveSpanBlocks(n));
+}
+
+void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
+  std::vector<uint32_t> item_binidx(mN);
+  for (uint32_t i = 0; i < mN; ++i) {
+    uint32_t pos = start_pos_spacing[i];
+    item_binidx[i] = pos % mNumSlots;
+    mItemToBlockIdx[i] = pos / mNumSlots;
+  }
+
+  mNumRealLayers = sequenceLayers(item_binidx, mItemToBlockIdx, mNumSlots,
+                                  mSpanBlocks, mItemToLayerIdx, mLayerMinBlock,
+                                  mLayerMaxBlock);
+
+  // The realized layer count is a function of Y (its collision structure), so
+  // it is padded up to the public budget before anything leaves this party.
+  //
+  // The budget bounds the *minimum* layer count, so overshooting it with the
+  // greedy is not yet the abort event: fall back to the optimal sequencing
+  // first. (The greedy has matched the optimum on every instance we have
+  // measured, so this path is not expected to run -- but the 2^-lambda abort
+  // guarantee should not rest on that.)
+  if (mNumRealLayers > mLayerBudget) {
+    mNumRealLayers = sequenceLayersOptimal(
+        item_binidx, mItemToBlockIdx, mNumSlots, mNumBatch, mSpanBlocks,
+        mItemToLayerIdx, mLayerMinBlock, mLayerMaxBlock);
+  }
+  if (mNumRealLayers > mLayerBudget) {
+    std::cout << "sequencing: " << mNumRealLayers << " layers exceed the "
+              << mLayerBudget << " layer budget" << std::endl;
+    throw RTE_LOC;
+  }
+
+  // The layout. Padding layers hold no item; their anchor is bookkeeping only.
+  // They are left where the sequencer put them, in a suffix: the sequencer
+  // front-loads each bin, so early layers are denser, but that is a prior the
+  // receiver can compute from the public parameters alone -- its view is
+  // uniform shares, with nothing in it that correlates with occupancy, so
+  // there is nothing for the prior to be applied to. (Where slot coordinates
+  // do become visible, as in the PSU transfer, permuting the layers would not
+  // be enough either; that needs the permute+share step noted in pso.h.)
+  mSlotToItem.assign(static_cast<size_t>(mNumLayers) * mNumSlots, UINT32_MAX);
+  for (uint32_t i = 0; i < mN; ++i) {
+    mSlotToItem[static_cast<size_t>(mItemToLayerIdx[i]) * mNumSlots +
+                item_binidx[i]] = i;
+  }
+
   mLayerMinBlock.resize(mNumLayers);
   mLayerMaxBlock.resize(mNumLayers);
-  for (uint32_t l = 0; l < mNumLayers; ++l) {
-    mLayerMinBlock[l] = layers[l].min_block;
-    mLayerMaxBlock[l] = layers[l].max_block;
+  mLayerIsPadding.assign(mNumLayers, 0);
+  for (uint32_t l = mNumRealLayers; l < mNumLayers; ++l) {
+    mLayerMinBlock[l] = 0;
+    mLayerMaxBlock[l] = 0;
+    mLayerIsPadding[l] = 1;
   }
 
-  std::vector<std::vector<uint32_t>> bin_layers(mNumSlots);
-  mLayerBins.resize(mNumLayers);
-  for (uint32_t l = 0; l < mNumLayers; l++) {
-    mLayerBins[l].assign(mNumSlots, UINT32_MAX);
-  }
-
-  for (uint32_t i = 0; i < mN; ++i) {
-    uint32_t bin = item_binidx[i];
-    uint32_t l = mItemToLayerIdx[i];
-    bin_layers[bin].push_back(l);
-    mLayerBins[l][bin] = i;
-  }
-
-  last_layer_per_bin.resize(mNumSlots);
-
-  for (uint32_t k = 0; k < mNumSlots; ++k) {
-    auto &nonempty_layers = bin_layers[k];
-    if (nonempty_layers.empty()) {
-      continue;
-    }
-    // last (nonempty) layer of k-th bin
-    uint32_t last_layer = 0;
-    for (auto &layeridx : nonempty_layers) {
-      last_layer = max(layeridx, last_layer);
-    }
-    last_layer_per_bin[k] = last_layer + 1;
-    BitVector oc_indicator(last_layer + 1);
-    for (auto &layeridx : nonempty_layers) {
-      oc_indicator[layeridx] = 1;
-    }
-    occupy_indicator_flat.append(oc_indicator);
-  }
-
-  ot_idx.resize(mN);
-  size_t idx = 0;
-
-  if (mRpmt) {
-    for (size_t lay = 0; lay < mNumLayers; ++lay) {
-      for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
-        if (mLayerBins[lay][bin] != UINT32_MAX) {
-          ot_idx[idx++] = mLayerBins[lay][bin];
-        }
-      }
-    }
-  } else {
-    maskings.resize(mN);
-    ptxts_mask.resize(mNumLayers);
-    vector<vector<uint64_t>> raw_masks(mNumLayers);
-    for (size_t lay = 0; lay < mNumLayers; lay++) {
-      raw_masks[lay].resize(mNumSlots);
-      mPrng.get<uint64_t>(raw_masks[lay]);
-      for (uint32_t bin = 0; bin < mNumSlots; bin++) {
-        raw_masks[lay][bin] =
-            seal::util::barrett_reduce_64(raw_masks[lay][bin], mModulus);
-        if (mLayerBins[lay][bin] != UINT32_MAX) {
-          ot_idx[idx] = mLayerBins[lay][bin];
-          maskings[idx++] = raw_masks[lay][bin];
-        }
-      }
-      mBatchEncoder->encode(raw_masks[lay], ptxts_mask[lay]);
-    }
-  }
 }
 
 void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
@@ -215,8 +427,15 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mW = ssParams.bandWidth;
   mNumBatch = mM / mNumSlots;
   mWrap = divCeil(mW * mNumSlots, mM) + 1;
-  mSpanBlocks = ssParams.span_blocks;
+  mSpanBlocks = ssParams.resolveSpanBlocks(mN);
+  mFloodBits = ssParams.floodBits;
   mPrng.SetSeed(seed);
+
+  // The layout is fixed by the public parameters, not by the sequencing --
+  // the sender pads up to it. Setting the layer count here rather than in
+  // sequencing() is what lets setup() size the GMW before any input is known.
+  mLayerBudget = ssParams.resolveLayerBudget(mN);
+  mNumLayers = mLayerBudget;
 
   mItemToBlockIdx.resize(mN);
   mItemToLayerIdx.resize(mN);
@@ -230,40 +449,121 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mContext = make_shared<SEALContext>(parms, true, sec_level_type::none);
   mBatchEncoder = make_unique<BatchEncoder>(*mContext);
   mEvaluator = make_unique<Evaluator>(*mContext);
+
+  // The level the decoded ciphertexts are switched down to before being
+  // returned; the flooded masks have to live there too.
+  mReturnParms = mContext->first_context_data()->next_context_data()->parms_id();
 };
 
-Proto SspmtSender::run(const std::vector<oc::block> &Y, Socket &chl) {
-  preprocess(Y);
+void SspmtSender::addFloodingNoise(seal::Ciphertext &ct) {
+  // BGV keeps the message in the low bits: c0 + c1*s = m + t*e, so the noise
+  // has to be added as a multiple of t. Ciphertexts are stored in NTT form,
+  // hence the transform before accumulating.
+  const auto ctxData = mContext->get_context_data(ct.parms_id());
+  const auto &coeffMod = ctxData->parms().coeff_modulus();
+  const auto ntt = ctxData->small_ntt_tables();
+  const size_t N = ctxData->parms().poly_modulus_degree();
+  const uint64_t t = mModulus.value();
+  const uint64_t bound = uint64_t(1) << mFloodBits;
+  const uint64_t mask = (uint64_t(1) << (mFloodBits + 1)) - 1;
 
-  vector<vector<Ciphertext>> encoded_in_he(mNumBatch);
-  co_await recv_encoded_chunks(encoded_in_he, chl);
-  co_await send_decoded_chunks(encoded_in_he, chl);
+  std::vector<uint64_t> raw(N), tmp(N);
+  mPrng.get<uint64_t>(raw);
+
+  for (size_t i = 0; i < coeffMod.size(); ++i) {
+    const auto &q = coeffMod[i];
+    const uint64_t tq = seal::util::barrett_reduce_64(t, q);
+    const uint64_t bq = seal::util::barrett_reduce_64(bound, q);
+    for (size_t j = 0; j < N; ++j) {
+      // e uniform over [-2^floodBits, 2^floodBits)
+      uint64_t v = seal::util::barrett_reduce_64(raw[j] & mask, q);
+      v = seal::util::sub_uint_mod(v, bq, q);
+      tmp[j] = seal::util::multiply_uint_mod(v, tq, q);
+    }
+    seal::util::ntt_negacyclic_harvey(tmp.data(), ntt[i]);
+    uint64_t *c0 = ct.data(0) + i * N;
+    seal::util::add_poly_coeffmod(c0, tmp.data(), N, q, c0);
+  }
+}
+
+void SspmtSender::buildFloodedMasks() {
+  // Masks are the sender's own randomness, so the whole thing is offline.
+  mMasks.resize(static_cast<size_t>(mNumLayers) * mNumSlots);
+  mFloodedMasks.resize(mNumLayers);
+
+  vector<uint64_t> raw(mNumSlots);
+  Plaintext ptxt;
+  for (uint32_t lay = 0; lay < mNumLayers; ++lay) {
+    mPrng.get<uint64_t>(raw);
+    for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+      raw[bin] = seal::util::barrett_reduce_64(raw[bin], mModulus);
+      mMasks[(size_t)lay * mNumSlots + bin] = raw[bin];
+    }
+    mBatchEncoder->encode(raw, ptxt);
+
+    mEncryptor->encrypt_zero(mReturnParms, mFloodedMasks[lay]);
+    mEvaluator->add_plain_inplace(mFloodedMasks[lay], ptxt);
+    addFloodingNoise(mFloodedMasks[lay]);
+  }
+}
+
+void SspmtSender::initGmw() {
+  const u64 keyBitLength = 40 + oc::log2ceil(mN);
+  auto cir = isZeroCircuit(keyBitLength);
+  mGmw.setTimer(getTimer());
+  mGmw.init(getLayoutSize(), cir, 1, mOTeBatchSize, 0, mPrng.get());
+}
+
+Proto SspmtSender::setup(Socket &chl) {
+  if (mSetupDone) {
+    co_return;
+  }
+
+  setTimePoint("Sender::Setup begin");
+
+  // The receiver's public key: needed to re-randomize what we send back, and
+  // the only thing published at the key level.
+  string pkstr;
+  co_await chl.recvResize(pkstr);
+  {
+    stringstream pkstream(pkstr);
+    PublicKey pk;
+    pk.load(*mContext, pkstream);
+    mEncryptor = make_unique<Encryptor>(*mContext, pk);
+  }
+  buildFloodedMasks();
+  setTimePoint("Sender::Setup (flooded masks)");
+
+  initGmw();
+  co_await mGmw.generateTriple(chl);
+  mSetupDone = true;
+  setTimePoint("Sender::Setup (GMW triples)");
 }
 
 Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
                        Socket &chl) {
-  assert(!mRpmt && "Sender obtains result only when ssPMT.");
-  co_await run(Y, chl);
+  // The triples are input independent; if the offline phase was skipped they
+  // are generated here instead, before any input-dependent work starts.
+  co_await setup(chl);
 
-  // GMW with maskings
-  u64 keyBitLength = 40 + oc::log2ceil(Y.size());
-  u64 keyByteLength = oc::divCeil(keyBitLength, 8);
+  preprocess(Y);
+  vector<vector<Ciphertext>> encoded_in_he(mNumBatch);
+  co_await recv_encoded_chunks(encoded_in_he, chl);
+  co_await send_decoded_chunks(encoded_in_he, chl);
 
-  oc::Matrix<u8> gmwin;
-  gmwin.resize(Y.size(), keyByteLength, oc::AllocType::Uninitialized);
-  for (size_t i = 0; i < Y.size(); i++) {
-    memcpy(&gmwin(i, 0), &maskings[i], keyByteLength);
+  const u64 nInst = getLayoutSize();
+  const u64 keyBitLength = 40 + oc::log2ceil(mN);
+  const u64 keyByteLength = oc::divCeil(keyBitLength, 8);
+
+  oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
+  for (size_t i = 0; i < nInst; i++) {
+    memcpy(&gmwin(i, 0), &mMasks[i], keyByteLength);
   }
+  mGmw.setInput(0, gmwin);
+  co_await mGmw.run(chl);  // triples already generated -> online only
 
-  Gmw gmw;
-  gmw.setTimer(getTimer());
-  auto cir = isZeroCircuit(keyBitLength);
-  gmw.init(Y.size(), cir, 1, mOTeBatchSize, 0, mPrng.get());
-  gmw.setInput(0, gmwin);
-  co_await gmw.run(chl);
-
-  auto rr = gmw.getOutputView(0);
-  results.resize(Y.size());
+  auto rr = mGmw.getOutputView(0);
+  results.resize(nInst);
   std::copy(rr.begin(), rr.end(), results.data());
   setTimePoint("Sender::Online GMW");
 }
@@ -315,10 +615,19 @@ void SspmtSender::preprocess(const std::vector<oc::block> &Y) {
   std::vector<Contrib> flat_contribs;
 
   for (uint32_t i = 0; i < mNumLayers; ++i) {
+    // Padding layers get their (single) random multiplier in
+    // encrypted_decode(); nothing to prepare here.
+    if (mLayerIsPadding[i]) {
+      continue;
+    }
+
+    uint32_t Bmin = mLayerMinBlock[i];
+    uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
+
     layer_meta.clear();
 
     for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
-      uint32_t item = mLayerBins[i][bin];
+      uint32_t item = mSlotToItem[static_cast<size_t>(i) * mNumSlots + bin];
       if (item == UINT32_MAX) {
         continue;
       }
@@ -327,9 +636,6 @@ void SspmtSender::preprocess(const std::vector<oc::block> &Y) {
           BinMeta{bin, bands + static_cast<size_t>(item) * mW,
                   mItemToBlockIdx[item]});
     }
-
-    uint32_t Bmin = mLayerMinBlock[i];
-    uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
 
     for (uint32_t chunk_begin = Bmin; chunk_begin <= Bmax;
          chunk_begin += B_CHUNK) {
@@ -419,6 +725,14 @@ void SspmtSender::encrypted_decode(
     Ciphertext tmp;
     Ciphertext &out = decoded_in_he[i - layerBegin];
 
+    // A padding layer carries no item, so the flooded mask alone is already
+    // what a decoded layer looks like: a uniform plaintext under a freshly
+    // re-randomized, flooded ciphertext.
+    if (mLayerIsPadding[i]) {
+      out = mFloodedMasks[i];
+      continue;
+    }
+
     const uint32_t Bmin = mLayerMinBlock[i];
     const uint32_t Bmax = mLayerMaxBlock[i] + (mW - 1);
 
@@ -470,11 +784,10 @@ void SspmtSender::encrypted_decode(
       }
     }
 
-    if (!mRpmt) {
-      mEvaluator->add_plain_inplace(out, ptxts_mask[i]);
-    }
-
+    // Switch down first: the flooding lives at the return level, and mod
+    // switching there would divide it away with the rest of the noise.
     mEvaluator->mod_switch_to_next_inplace(out);
+    mEvaluator->add_inplace(out, mFloodedMasks[i]);
   }
 }
 
@@ -515,8 +828,8 @@ Proto SspmtSender::recv_encoded_chunks(
 Proto SspmtSender::send_decoded_chunks(
     const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
     Socket &chl) {
-  co_await chl.send(mNumLayers);
-
+  // The layer count is the public budget, known to both parties from the
+  // parameters, so it is never transmitted: the realized count depends on Y.
   size_t sentBytes = 0;
   std::vector<Ciphertext> decoded_chunk;
   stringstream sendstream;
@@ -543,9 +856,6 @@ Proto SspmtSender::send_decoded_chunks(
   cout << "Sender sends " << mNumLayers << " decoded ctxts, " << sentBytes
        << " Bytes" << endl;
 
-  co_await chl.send(move(last_layer_per_bin));
-  co_await chl.send(move(occupy_indicator_flat));
-
   setTimePoint("Sender::Encrypted OKVS Decoding & Send Back");
 }
 
@@ -563,6 +873,10 @@ void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
   mWrap = divCeil(mW * mNumSlots, mM) + 1;
   mPrng.SetSeed(seed);
 
+  // Same public formula as the sender's, over the sender's set size: both
+  // parties must agree on the layout size without communicating it.
+  mLayerBudget = ssParams.resolveLayerBudget(mNsender);
+
   parms.set_coeff_modulus(
       CoeffModulus::Create(mNumSlots, ssParams.heCoeffModulus));
   mModulus =
@@ -575,6 +889,7 @@ void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
   PublicKey public_key;
   keygen.create_public_key(public_key);
 
+  mPublicKey = public_key;
   mEncryptor = make_unique<Encryptor>(*mContext, public_key);
   mEncryptor->set_secret_key(secret_key);
 
@@ -582,66 +897,83 @@ void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
   mDecryptor = make_unique<Decryptor>(*mContext, secret_key);
 };
 
+void SspmtReceiver::initGmw() {
+  const u64 keyBitLength = 40 + oc::log2ceil(mNsender);
+  auto cir = isZeroCircuit(keyBitLength);
+  mGmw.setTimer(getTimer());
+  mGmw.init(getLayoutSize(), cir, 1, mOTeBatchSize, 1, mPrng.get());
+}
+
+Proto SspmtReceiver::setup(Socket &chl) {
+  if (mSetupDone) {
+    co_return;
+  }
+
+  setTimePoint("Receiver::Setup begin");
+
+  {
+    stringstream pkstream;
+    mPublicKey.save(pkstream);
+    auto payload = pkstream.str();
+    co_await chl.send(move(payload));
+  }
+
+  initGmw();
+  co_await mGmw.generateTriple(chl);
+  mSetupDone = true;
+  setTimePoint("Receiver::Setup (GMW triples)");
+}
+
 Proto SspmtReceiver::run(const std::vector<oc::block> &X,
                          oc::BitVector &results, Socket &chl) {
+  co_await setup(chl);
+
   co_await send_encoded_chunks(X, chl);
 
+  // The equality runs over the whole L x H rectangle -- no occupancy is
+  // received -- so slot (layer i, bin b) matches iff the Y-item sitting there
+  // (if any) is in X; empty slots decode to 0 and never match.
   vector<Ciphertext> decoded_in_he;
   co_await recv_decoded_chunks(decoded_in_he, chl);
-  co_await chl.recvResize(last_layer_per_bin);
 
-  auto len = 0;
-  for (size_t i = 0; i < mNumSlots; i++) {
-    len += last_layer_per_bin[i];
-  }
-  oc::BitVector occupy_indicator_flat(len);
-  co_await chl.recv(occupy_indicator_flat);
+  const size_t nInst = getLayoutSize();
+  const u64 keyBitLength = 40 + oc::log2ceil(mNsender);
+  const u64 keyByteLength = oc::divCeil(keyBitLength, 8);
 
-  mLayerToBins.clear();
-  mLayerToBins.resize(decoded_in_he.size());
-  auto offset = 0;
-  for (size_t i = 0; i < mNumSlots; i++) {
-    for (uint32_t layer = 0; layer < last_layer_per_bin[i]; ++layer) {
-      if (occupy_indicator_flat[offset + layer]) {
-        mLayerToBins[layer].push_back(static_cast<uint32_t>(i));
-      }
+  // How much room is left for the noise flooding that re-randomization will
+  // need: the returned ciphertexts must still decrypt after e_flood is added,
+  // so the smallest budget here is the ceiling on log2(e_flood / e_compute).
+  {
+    int minBudget = INT32_MAX, maxBudget = 0;
+    for (size_t i = 0; i < mLayerBudget; ++i) {
+      const int budget = mDecryptor->invariant_noise_budget(decoded_in_he[i]);
+      minBudget = std::min(minBudget, budget);
+      maxBudget = std::max(maxBudget, budget);
     }
-    offset += last_layer_per_bin[i];
+    cout << "Return noise budget: " << minBudget << " - " << maxBudget
+         << " bits" << endl;
   }
 
-  vector<uint64_t> dec_results;
-  decrypt(decoded_in_he, dec_results);
-
-  if (mRpmt) {
-    results.resize(mNsender);
-    for (size_t i = 0; i < mNsender; i++) {
-      results[i] = (dec_results[i] == mIndicatorStr) ? 1 : 0;
+  oc::Matrix<u8> gmwin(nInst, keyByteLength, oc::AllocType::Uninitialized);
+  vector<uint64_t> decodeVec(mNumSlots);
+  Plaintext ptxt;
+  for (size_t i = 0; i < mLayerBudget; ++i) {
+    mDecryptor->decrypt(decoded_in_he[i], ptxt);
+    mBatchEncoder->decode(ptxt, decodeVec);
+    for (uint32_t bin = 0; bin < mNumSlots; ++bin) {
+      auto tmp = util::sub_uint_mod(decodeVec[bin], mIndicatorStr, mModulus);
+      memcpy(&gmwin(i * mNumSlots + bin, 0), &tmp, keyByteLength);
     }
-  } else {
-    // GMW with dec_results
-    u64 keyBitLength = 40 + oc::log2ceil(mNsender);
-    u64 keyByteLength = oc::divCeil(keyBitLength, 8);
-
-    oc::Matrix<u8> gmwin;
-
-    gmwin.resize(mNsender, keyByteLength, oc::AllocType::Uninitialized);
-    for (size_t i = 0; i < mNsender; i++) {
-      auto tmp = util::sub_uint_mod(dec_results[i], mIndicatorStr, mModulus);
-      memcpy(&gmwin(i, 0), &tmp, keyByteLength);
-    }
-
-    Gmw gmw;
-    gmw.setTimer(getTimer());
-    auto cir = isZeroCircuit(keyBitLength);
-    gmw.init(mNsender, cir, 1, mOTeBatchSize, 1, mPrng.get());
-    gmw.setInput(0, gmwin);
-    co_await gmw.run(chl);
-
-    auto rr = gmw.getOutputView(0);
-    results.resize(mNsender);
-    std::copy(rr.begin(), rr.end(), results.data());
-    setTimePoint("Receiver::Online GMW");
   }
+  setTimePoint("Receiver::Decrypt");
+
+  mGmw.setInput(0, gmwin);
+  co_await mGmw.run(chl);  // triples already generated -> online only
+
+  auto rr = mGmw.getOutputView(0);
+  results.resize(nInst);
+  std::copy(rr.begin(), rr.end(), results.data());
+  setTimePoint("Receiver::Online GMW");
 }
 
 Proto SspmtReceiver::send_encoded_chunks(const std::vector<oc::block> &X,
@@ -706,19 +1038,17 @@ Proto SspmtReceiver::send_encoded_chunks(const std::vector<oc::block> &X,
 
 Proto SspmtReceiver::recv_decoded_chunks(
     std::vector<seal::Ciphertext> &decoded_in_he, Socket &chl) {
-  uint32_t decoded_he_size;
-  co_await chl.recv(decoded_he_size);
-
-  decoded_in_he.resize(decoded_he_size);
+  const uint32_t numLayers = mLayerBudget;
+  decoded_in_he.resize(numLayers);
   SEALContext context = *mContext;
   string recvstring;
   stringstream recvstream;
 
   const uint32_t chunkSize = decodedLayerChunk();
-  for (uint32_t layerBegin = 0; layerBegin < decoded_he_size;
+  for (uint32_t layerBegin = 0; layerBegin < numLayers;
        layerBegin += chunkSize) {
     const uint32_t layerEnd =
-        std::min<uint32_t>(decoded_he_size, layerBegin + chunkSize);
+        std::min<uint32_t>(numLayers, layerBegin + chunkSize);
     co_await chl.recvResize(recvstring);
 
     recvstream.clear();
@@ -730,31 +1060,5 @@ Proto SspmtReceiver::recv_decoded_chunks(
   }
 
   setTimePoint("Receiver::Recv back and Serialize");
-}
-
-void SspmtReceiver::decrypt(const std::vector<seal::Ciphertext> &decoded_in_he,
-                            std::vector<uint64_t> &dec_results) {
-  const size_t L = decoded_in_he.size();
-  vector<Plaintext> ptxts(L);
-
-  //   cout << "Noise Budget: "
-  //    << mDecryptor->invariant_noise_budget(decoded_in_he[0]) << endl;
-
-  for (size_t i = 0; i < L; i++) {
-    mDecryptor->decrypt(decoded_in_he[i], ptxts[i]);
-  }
-
-  dec_results.resize(mNsender);
-  vector<uint64_t> decodeVec(mNumSlots);
-
-  auto idx = 0;
-  for (size_t i = 0; i < L; i++) {
-    mBatchEncoder->decode(ptxts[i], decodeVec);
-
-    for (auto bin : mLayerToBins[i]) {
-      dec_results[idx++] = decodeVec[bin];
-    }
-  }
-  setTimePoint("Receiver::Decrypt");
 }
 }  // namespace rlweOkvs

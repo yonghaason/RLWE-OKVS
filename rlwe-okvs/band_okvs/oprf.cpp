@@ -37,10 +37,14 @@ namespace rlweOkvs
         cout << "Sender receives OPRF ("
              << pp.size() * sizeof(block) << " Bytes)" << endl;
 
-        band_okvs::BandOkvs okvs;        
+        band_okvs::BandOkvs okvs;
         auto band_length = 196;
-        okvs.Init(mNreceiver, m, band_length, oc::ZeroBlock);
-        
+        // Decode instance: the number of equations is OUR evaluation count mN
+        // (mNreceiver only determines the OKVS length m). The two coincide in
+        // the balanced OPRF test, but differ when the sender evaluates at a
+        // different number of points than the receiver encoded (e.g. CPSI).
+        okvs.Init(mN, m, band_length, oc::ZeroBlock);
+
         vector<block> kk(m);
         for (size_t i = 0; i < m; i++) {
             kk[i] = voleSender.mB[i] ^ Delta.gf128Mul(pp[i]);

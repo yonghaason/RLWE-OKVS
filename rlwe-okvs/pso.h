@@ -6,213 +6,211 @@
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Network/Channel.h"
 #include "coproto/coproto.h"
-#include "rlwe-okvs/rpmt.h"
 #include "rlwe-okvs/sspmt.h"
+#include "PS/PermuteShare.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtReceiver.h"
 #include "libOTe/TwoChooseOne/Silent/SilentOtExtSender.h"
 #include "seal/seal.h"
-
-int psu(int n, int t_s, int m,  vector<int> vector);
-
 
 namespace rlweOkvs
 {
     using Proto = coproto::task<>;
     using Socket = coproto::Socket;
 
-    class PsuSender: public oc::TimerAdapter
+    // Random OTs held by a party, generated in the offline phase. Their count
+    // is a public function of the parameters, and their choice bits are
+    // random, so nothing here depends on either input; the online phase just
+    // derandomizes them (one bit per OT).
+    struct RotStore
     {
-        uint32_t mN;
-        uint32_t mNreceiver;
-        oc::PRNG mPrng;        
-        rpmtParams mPmtParams;       
-
-        RpmtSender rpmtSender;
-        SilentOtExtSender otSender;
-
-    public:
-        
-        void initWithParam(uint32_t n, uint32_t nReceiver, 
-            rpmtParams pmtParams, oc::block seed) {
-            mN = n;
-            mNreceiver = nReceiver;
-            mPmtParams = pmtParams;
-            mPrng.SetSeed(seed);
-        };
-
-        void init(uint32_t n, uint32_t nReceiver, oc::block seed) {
-            mN = n;
-            mNreceiver = nReceiver;
-            mPmtParams.initialize(nReceiver);
-            mPrng.SetSeed(seed);
-        };
-
-        Proto run(
-            const std::vector<oc::block> &Y, 
-            Socket &chl);
+        std::vector<std::array<oc::block, 2>> mSend;   // sender side
+        std::vector<oc::block> mRecv;                  // receiver side
+        oc::BitVector mChoices;                        // receiver side
     };
 
-    class PsuReceiver: public oc::TimerAdapter
+    Proto genRotSender(oc::SilentOtExtSender& ot, oc::PRNG& prng, Socket& chl,
+        oc::u64 count, RotStore& store);
+    Proto genRotReceiver(oc::SilentOtExtReceiver& ot, oc::PRNG& prng,
+        Socket& chl, oc::u64 count, RotStore& store);
+
+    // Turn the ssPMT output -- XOR shares b_s = u_s ^ v_s of the per-slot
+    // membership bits -- into additive shares of sum_s b_s * w_s (mod 2^32)
+    // for each of the given weight vectors, using one random OT per (weight,
+    // slot). The receiver's share minus the sender's is the weighted sum, so
+    // nothing about the individual bits is revealed. With w = 1 this is the
+    // intersection cardinality; with w = the payload at that slot it is the
+    // payload sum over the intersection.
+    //
+    // The OTs come from the offline phase, so all that happens here is the
+    // choice-bit correction and one u32 per OT.
+    Proto weightedSumSender(
+        const RotStore& rot, Socket& chl,
+        const oc::BitVector& shareBits,
+        const std::vector<std::vector<oc::u32>>& weights,
+        std::vector<oc::u32>& shares);
+
+    Proto weightedSumReceiver(
+        const RotStore& rot, Socket& chl,
+        const oc::BitVector& shareBits, oc::u64 numWeights,
+        std::vector<oc::u32>& shares);
+
+    // Common state of the ssPMT-based private set operations.
+    struct PsoBase : public oc::TimerAdapter
     {
-        uint32_t mN;
-        uint32_t mNsender;
-        oc::PRNG mPrng;
-        rpmtParams mPmtParams;
-
-        RpmtReceiver rpmtReceiver;
-        SilentOtExtReceiver otReceiver;
-        
-
-    public:
-
-        void initWithParam(uint32_t n, uint32_t nSender, 
-            rpmtParams pmtParams, oc::block seed) {
-            mN = n;
-            mNsender = nSender;
-            mPmtParams = pmtParams;
-            mPrng.SetSeed(seed);
-        };
-
-
-        void init(uint32_t n, uint32_t nSender, oc::block seed) {
-            mN = n;
-            mNsender = nSender;
-            mPmtParams.initialize(n);
-            mPrng.SetSeed(seed);
-        };
-
-        Proto run(
-            const std::vector<oc::block> &X, 
-            std::vector<oc::block>& D, 
-            Socket &chl);
-    };
-
-    class PsuSspmtSender: public oc::TimerAdapter
-    {
-        uint32_t mN;
-        uint32_t mNreceiver;
+        uint32_t mN = 0;
+        uint32_t mNother = 0;
         oc::PRNG mPrng;
         sspmtParams mSsParams;
 
-        SspmtSender sspmtSender;
-        SilentOtExtSender otSender;
-
-    public:
-        void initWithParam(uint32_t n, uint32_t nReceiver,
+        void initWithParam(uint32_t n, uint32_t nOther,
             sspmtParams ssParams, oc::block seed) {
             mN = n;
-            mNreceiver = nReceiver;
+            mNother = nOther;
             mSsParams = ssParams;
             mPrng.SetSeed(seed);
         };
 
-        void init(uint32_t n, uint32_t nReceiver, oc::block seed) {
+        void init(uint32_t n, uint32_t nOther, oc::block seed) {
             mN = n;
-            mNreceiver = nReceiver;
-            mSsParams.initialize(nReceiver);
-            mPrng.SetSeed(seed);
-        };
-
-        Proto run(
-            const std::vector<oc::block> &Y,
-            Socket &chl);
-    };
-
-    class PsuSspmtReceiver: public oc::TimerAdapter
-    {
-        uint32_t mN;
-        uint32_t mNsender;
-        oc::PRNG mPrng;
-        sspmtParams mSsParams;
-
-        SspmtReceiver sspmtReceiver;
-        SilentOtExtReceiver otReceiver;
-
-    public:
-        void initWithParam(uint32_t n, uint32_t nSender,
-            sspmtParams ssParams, oc::block seed) {
-            mN = n;
-            mNsender = nSender;
-            mSsParams = ssParams;
-            mPrng.SetSeed(seed);
-        };
-
-        void init(uint32_t n, uint32_t nSender, oc::block seed) {
-            mN = n;
-            mNsender = nSender;
+            mNother = nOther;
             mSsParams.initialize(n);
             mPrng.SetSeed(seed);
         };
 
-        Proto run(
-            const std::vector<oc::block> &X,
-            std::vector<oc::block>& D,
-            Socket &chl);
+        bool mSetupDone = false;
+        RotStore mRot;
     };
 
-    class PsiCardSumSender : public oc::TimerAdapter
+    // Private set union.
+    //
+    // The transfer cannot be indexed by layout slot: the receiver hashes its
+    // own items to slot columns, so seeing which slot an element arrived from
+    // is what a Chandran-style analysis attacks -- the membership bits
+    // themselves are not the problem. Permute + share fixes the indexing. The
+    // sender picks a permutation whose first n_y outputs are the slots of its
+    // items, in a random item order; after F_PS the two parties hold shares of
+    // the membership bits in *that* order, so the final OT runs over item
+    // indices and no slot is ever named.
+    class PsuSender : public PsoBase
     {
-        uint32_t mN;
-        uint32_t mNreceiver;
-        oc::PRNG mPrng;
-        rpmtParams mPmtParams;
-
-        RpmtSender rpmtSender;
-        SilentOtExtSender otSender;
+        SspmtSender sspmtSender;
+        oc::SilentOtExtSender otSender;
+        oc::SilentOtExtReceiver otSwitchReceiver;  // permute+share switches
+        PermuteShareSender psSender;
 
     public:
-        void initWithParam(uint32_t n, uint32_t nReceiver, rpmtParams pmtParams, oc::block seed)
-        {
-            mN = n;
-            mNreceiver = nReceiver;
-            mPmtParams = pmtParams;
-            mPrng.SetSeed(seed);
-        }
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
 
-        void init(uint32_t n, uint32_t nReceiver, oc::block seed)
-        {
-            mN = n;
-            mNreceiver = nReceiver;
-            mPmtParams.initialize(nReceiver);
-            mPrng.SetSeed(seed);
-        }
+        Proto run(const std::vector<oc::block>& Y, Socket& chl);
+    };
 
-        Proto run(
-            const std::vector<oc::block>& Y,
-            const std::vector<oc::u32>& payloads,
+    class PsuReceiver : public PsoBase
+    {
+        SspmtReceiver sspmtReceiver;
+        oc::SilentOtExtReceiver otReceiver;
+        oc::SilentOtExtSender otSwitchSender;      // permute+share switches
+        PermuteShareReceiver psReceiver;
+
+    public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
+        Proto run(const std::vector<oc::block>& X,
+            std::vector<oc::block>& D, Socket& chl);
+    };
+
+    // Intersection cardinality: |X n Y| to the receiver only.
+    class PsiCardSender : public PsoBase
+    {
+        SspmtSender sspmtSender;
+        oc::SilentOtExtSender otSender;
+
+    public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
+        Proto run(const std::vector<oc::block>& Y, Socket& chl);
+    };
+
+    class PsiCardReceiver : public PsoBase
+    {
+        SspmtReceiver sspmtReceiver;
+        oc::SilentOtExtReceiver otReceiver;
+
+    public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
+        Proto run(const std::vector<oc::block>& X,
+            oc::u64& cardinality, Socket& chl);
+    };
+
+    // Sum of the sender's payloads over the intersection, to the receiver
+    // only.
+    class PsiSumSender : public PsoBase
+    {
+        SspmtSender sspmtSender;
+        oc::SilentOtExtSender otSender;
+
+    public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
+        Proto run(const std::vector<oc::block>& Y,
+            const std::vector<oc::u32>& payloads, Socket& chl);
+    };
+
+    class PsiSumReceiver : public PsoBase
+    {
+        SspmtReceiver sspmtReceiver;
+        oc::SilentOtExtReceiver otReceiver;
+
+    public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
+        Proto run(const std::vector<oc::block>& X,
+            oc::u64& payloadSum, Socket& chl);
+    };
+
+    // Threshold: only the bit 1(|X n Y| >= t), the cardinality itself stays
+    // secret-shared and is compared inside a GMW circuit.
+    class PsiThresholdSender : public PsoBase
+    {
+        SspmtSender sspmtSender;
+        oc::SilentOtExtSender otSender;
+        // The comparison circuit: one instance of real input, sized and
+        // supplied with triples in the offline phase like everything else.
+        volePSI::Gmw mGmw;
+
+    public:
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
+
+        Proto run(const std::vector<oc::block>& Y, oc::u32 threshold,
             Socket& chl);
     };
 
-    class PsiCardSumReceiver : public oc::TimerAdapter
+    class PsiThresholdReceiver : public PsoBase
     {
-        uint32_t mN;
-        uint32_t mNsender;
-        oc::PRNG mPrng;
-        rpmtParams mPmtParams;
-
-        RpmtReceiver rpmtReceiver;
-        SilentOtExtReceiver otReceiver;
+        SspmtReceiver sspmtReceiver;
+        oc::SilentOtExtReceiver otReceiver;
+        volePSI::Gmw mGmw;
 
     public:
-        void initWithParam(uint32_t n, uint32_t nSender, rpmtParams pmtParams, oc::block seed)
-        {
-            mN = n;
-            mNsender = nSender;
-            mPmtParams = pmtParams;
-            mPrng.SetSeed(seed);
-        }
+        // Offline phase: the ss-PMT's input-independent correlated randomness.
+        // run() does it inline when skipped.
+        Proto setup(Socket& chl);
 
-        void init(uint32_t n, uint32_t nSender, oc::block seed)
-        {
-            mN = n;
-            mNsender = nSender;
-            mPmtParams.initialize(n);
-            mPrng.SetSeed(seed);
-        }
-
-        Proto run(
-            const std::vector<oc::block>& X,
-            oc::u64& psiCardSum,
-            Socket& chl);
+        Proto run(const std::vector<oc::block>& X, oc::u32 threshold,
+            bool& aboveThreshold, Socket& chl);
     };
 };

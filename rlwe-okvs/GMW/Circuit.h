@@ -16,5 +16,16 @@ namespace volePSI
 
     BetaCircuit isZeroCircuit(oc::u64 bits);
 
+    // Threshold comparison over arithmetic shares. Three input bundles of
+    // `bits` wires each -- a, b and t -- and a single output wire set to
+    // 1(a + b > t), where a + b is computed modulo 2^bits. The two parties
+    // feed their arithmetic shares of the cardinality into a and b (each one
+    // sets its own bundle and zeroes the other, so the XOR-shared bundle
+    // values are the shares themselves) and the public threshold into t.
+    // Testing "at least T" therefore means passing t = T - 1 (T >= 1); the
+    // strict form is what keeps the output wire free of an invert flag, which
+    // the GMW backend would drop.
+    BetaCircuit sumThresholdCircuit(oc::u64 bits);
+
     void isZeroCircuit_Test();
 }

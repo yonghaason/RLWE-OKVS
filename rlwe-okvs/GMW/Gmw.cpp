@@ -66,15 +66,6 @@ namespace volePSI
 
 		co_await(tg.expand(chl));
 
-		// auto& tg = mStationary;
-		// setTimePoint("Gmw::generateTriple begin");
-		// if (mTimer)
-		// 	tg.setTimer(*mTimer);
-
-		// tg.init(mNumOts, mBatchSize, mNumThreads, mIdx ? Mode::Receiver : Mode::Sender, mPrng.get());
-		
-		// co_await(tg.run(chl));
-
 		if (mIdx)
 		{
 			mA = tg.mMult.subspan(0, mid);

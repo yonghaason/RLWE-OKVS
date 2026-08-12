@@ -1,4 +1,4 @@
-#include "RPMT_tests.h"
+#include "OPRF_tests.h"
 #include "band_okvs/oprf.h"
 
 #include "cryptoTools/Common/Defines.h"

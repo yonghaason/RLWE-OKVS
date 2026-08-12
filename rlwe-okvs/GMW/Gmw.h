@@ -9,7 +9,6 @@
 #include "Defines.h"
 #include "Circuit.h"
 #include "SilentTripleGen.h"
-#include "TripleGen.h"
 #include <list>
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Common/Matrix.h>
@@ -109,8 +108,6 @@ namespace volePSI
         oc::MatrixView<u8> getMemView(BetaBundle& wires);
 
         SilentTripleGen mSilent;
-        TripleGen mStationary;
-        //IknpTripleGen mIknp;
 
         u64 numRounds()
         {
