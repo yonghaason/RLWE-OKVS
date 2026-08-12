@@ -3,6 +3,7 @@
 
 #include "cryptoTools/Common/Defines.h"
 #include "cryptoTools/Common/CLP.h"
+#include "cryptoTools/Common/TestCollection.h"
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/PRNG.h"
 #ifdef COPROTO_ENABLE_BOOST
@@ -146,7 +147,7 @@ void sspmt_net_test(const oc::CLP& cmd)
 
     string role = cmd.getOr<string>("role", "");
     if (role != "sender" && role != "recver")
-        throw std::runtime_error(
+        throw oc::UnitTestSkipped(
             "sspmt_net_test needs -role sender|recver (and both processes "
             "must agree on -ip <sender-addr:port>, -nn, -inter)");
     bool isSender = (role == "sender");

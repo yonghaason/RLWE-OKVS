@@ -10,9 +10,12 @@
 # a re-setup.
 #
 #   sudo ./wan_netns.sh setup [RATE] [DELAY] [LIMIT]  # default: 100mbit 40ms 5000
-#   sudo ./wan_netns.sh run [./run args...]           # e.g. run -nn 20 -v
+#   sudo ./wan_netns.sh run [TEST] [./run args...]    # e.g. run 8 -nn 20 -v
 #   sudo ./wan_netns.sh status
 #   sudo ./wan_netns.sh teardown
+#
+# TEST is the *_net_test index in tests/UnitTests.cpp (default 7):
+#   7 SSPMT   8 PSU   9 PSI-Card   10 PSI-Sum   11 PSI-Threshold
 #
 # NOTE on DELAY: it is applied once per direction, so RTT = 2 x DELAY.
 # DELAY=40ms gives RTT 80ms (same as `netem delay 40ms` on lo); use 20ms
@@ -68,6 +71,7 @@ setup)
 run)
     need_root
     shift
+    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then TEST_IDX=$1; shift; fi
     if ! ip netns list | grep -q "^$NS0"; then
         echo "namespaces not set up; run: sudo $0 setup"; exit 1
     fi
@@ -109,6 +113,6 @@ teardown)
     ;;
 
 *)
-    grep "^#" "$0" | head -20 | sed 's/^# \?//'
+    grep "^#" "$0" | head -27 | sed 's/^# \?//'
     ;;
 esac

@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 이 레포는 KKLS(base RPMT, EPRINT:KwaKwoLeeSon26)의 구현(`rlwe-okvs/`, `exec/`,
-`experiments/`)과 후속 note(`docs/kkls-followup-note.tex`,
-`docs/kkls-followup-brief.md`)를 담는다.
+`experiments/`)을 담는다. (후속 note와 CPSI 코드는 2026-08-12에 제거됨 —
+git 히스토리에는 남아 있다.)
 
 ## 사용자 선호 — 채팅 응답에서의 수식 표기
 
