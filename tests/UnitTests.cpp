@@ -20,7 +20,7 @@ namespace rlweOkvsTests {
     t.add("Sequencing_test                  ", opti_sequencing_test);
     t.add("SSPMT_fulllayout_protocol_test   ", sspmt_fulllayout_protocol_test);
     t.add("PSI_card_test                    ", psi_card_test);
-    t.add("PSI_card_sum_test                ", psi_card_sum_test);
+    t.add("PSI_sum_test                     ", psi_sum_test);
     t.add("PSI_threshold_test               ", psi_threshold_test);
     t.add("PermuteShare_test                ", permute_share_test);
     t.add("PSU_protocol_test                ", psu_protocol_test);

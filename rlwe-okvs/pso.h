@@ -150,9 +150,9 @@ namespace rlweOkvs
             oc::u64& cardinality, Socket& chl);
     };
 
-    // Intersection cardinality together with the sum of the sender's payloads
-    // over the intersection.
-    class PsiCardSumSender : public PsoBase
+    // Sum of the sender's payloads over the intersection, to the receiver
+    // only.
+    class PsiSumSender : public PsoBase
     {
         SspmtSender sspmtSender;
         oc::SilentOtExtSender otSender;
@@ -166,7 +166,7 @@ namespace rlweOkvs
             const std::vector<oc::u32>& payloads, Socket& chl);
     };
 
-    class PsiCardSumReceiver : public PsoBase
+    class PsiSumReceiver : public PsoBase
     {
         SspmtReceiver sspmtReceiver;
         oc::SilentOtExtReceiver otReceiver;
@@ -177,7 +177,7 @@ namespace rlweOkvs
         Proto setup(Socket& chl);
 
         Proto run(const std::vector<oc::block>& X,
-            oc::u64& cardinality, oc::u64& payloadSum, Socket& chl);
+            oc::u64& payloadSum, Socket& chl);
     };
 
     // Threshold: only the bit 1(|X n Y| >= t), the cardinality itself stays

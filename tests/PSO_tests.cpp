@@ -39,7 +39,7 @@ struct PsoFixture
 
     macoro::thread_pool pool0, pool1;
     optional<macoro::thread_pool::work> e0, e1;
-    array<coproto::LocalAsyncSocket, 2> socket;
+    array<coproto::AsioSocket, 2> socket;
     Timer timer_s, timer_r;
     // Bytes on the wire when the offline phase ended, so the report can split
     // setup from the online protocol.
@@ -47,7 +47,7 @@ struct PsoFixture
 
     PsoFixture(const oc::CLP& cmd)
         : prng(block(9871234, 1276353))
-        , socket(coproto::LocalAsyncSocket::makePair())
+        , socket(coproto::AsioSocket::makePair())
     {
         n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
         nt = cmd.getOr("nt", 1);
@@ -191,15 +191,15 @@ void psi_card_test(const oc::CLP& cmd)
     f.report(cmd);
 }
 
-void psi_card_sum_test(const oc::CLP& cmd)
+void psi_sum_test(const oc::CLP& cmd)
 {
     PsoFixture f(cmd);
 
     vector<u32> payloads(f.n);
     for (auto& p : payloads) p = f.prng.get<u32>() % 1000;
 
-    PsiCardSumSender sender;
-    PsiCardSumReceiver receiver;
+    PsiSumSender sender;
+    PsiSumReceiver receiver;
     sender.setTimer(f.timer_s);
     receiver.setTimer(f.timer_r);
     sender.initWithParam(f.n, f.n, f.params, f.prng.get());
@@ -207,28 +207,21 @@ void psi_card_sum_test(const oc::CLP& cmd)
 
     f.runSetup(sender, receiver);
 
-    u64 cardinality = 0, payloadSum = 0;
+    u64 payloadSum = 0;
     f.runBoth(sender.run(f.Y, payloads, f.socket[0]),
-              receiver.run(f.X, cardinality, payloadSum, f.socket[1]));
+              receiver.run(f.X, payloadSum, f.socket[1]));
 
     std::unordered_set<oc::block> setX(f.X.begin(), f.X.end());
-    u64 expectedCard = 0, expectedSum = 0;
-    for (u64 i = 0; i < f.n; ++i) {
-        if (setX.count(f.Y[i])) {
-            ++expectedCard;
-            expectedSum += payloads[i];
-        }
-    }
+    u64 expectedSum = 0;
+    for (u64 i = 0; i < f.n; ++i)
+        if (setX.count(f.Y[i])) expectedSum += payloads[i];
 
-    if (cardinality != expectedCard || payloadSum != expectedSum) {
-        cerr << "Protocol = (" << cardinality << ", " << payloadSum
-             << "), real = (" << expectedCard << ", " << expectedSum << ")"
+    if (payloadSum != expectedSum) {
+        cerr << "Protocol = " << payloadSum << ", real = " << expectedSum
              << endl;
         throw RTE_LOC;
     }
-    if (cmd.isSet("v"))
-        cout << "PSI card = " << cardinality << ", sum = " << payloadSum
-             << endl;
+    if (cmd.isSet("v")) cout << "PSI sum = " << payloadSum << endl;
 
     f.report(cmd);
 }
@@ -237,48 +230,30 @@ void psi_threshold_test(const oc::CLP& cmd)
 {
     PsoFixture f(cmd);
 
-    // Check both sides of the threshold with the same sets.
-    for (u64 rep = 0; rep < 2; ++rep) {
-        const u32 t = (u32)(rep == 0 ? f.inter : f.inter + 1);
+    const u32 t = cmd.getOr("t", (u32)f.inter);
 
-        auto socket = coproto::LocalAsyncSocket::makePair();
-        socket[0].setExecutor(f.pool0);
-        socket[1].setExecutor(f.pool1);
+    PsiThresholdSender sender;
+    PsiThresholdReceiver receiver;
+    sender.setTimer(f.timer_s);
+    receiver.setTimer(f.timer_r);
+    sender.initWithParam(f.n, f.n, f.params, f.prng.get());
+    receiver.initWithParam(f.n, f.n, f.params, f.prng.get());
 
-        PsiThresholdSender sender;
-        PsiThresholdReceiver receiver;
-        sender.setTimer(f.timer_s);
-        receiver.setTimer(f.timer_r);
-        sender.initWithParam(f.n, f.n, f.params, f.prng.get());
-        receiver.initWithParam(f.n, f.n, f.params, f.prng.get());
+    f.runSetup(sender, receiver);
 
-        bool above = false;
-        auto s0 = sender.setup(socket[0]);
-        auto s1 = receiver.setup(socket[1]);
-        auto rs = macoro::sync_wait(macoro::when_all_ready(
-            std::move(s0) | macoro::start_on(f.pool0),
-            std::move(s1) | macoro::start_on(f.pool1)));
-        std::get<0>(rs).result();
-        std::get<1>(rs).result();
+    bool above = false;
+    f.runBoth(sender.run(f.Y, t, f.socket[0]),
+              receiver.run(f.X, t, above, f.socket[1]));
 
-        auto p0 = sender.run(f.Y, t, socket[0]);
-        auto p1 = receiver.run(f.X, t, above, socket[1]);
-        auto r = macoro::sync_wait(macoro::when_all_ready(
-            std::move(p0) | macoro::start_on(f.pool0),
-            std::move(p1) | macoro::start_on(f.pool1)));
-        std::get<0>(r).result();
-        std::get<1>(r).result();
-
-        const bool expected = f.inter >= t;
-        if (above != expected) {
-            cerr << "threshold t = " << t << ": protocol = " << above
-                 << ", real = " << expected << " (|X n Y| = " << f.inter << ")"
-                 << endl;
-            throw RTE_LOC;
-        }
-        if (cmd.isSet("v"))
-            cout << "threshold t = " << t << " -> " << above << endl;
+    const bool expected = f.inter >= t;
+    if (above != expected) {
+        cerr << "threshold t = " << t << ": protocol = " << above
+             << ", real = " << expected << " (|X n Y| = " << f.inter << ")"
+             << endl;
+        throw RTE_LOC;
     }
+    if (cmd.isSet("v"))
+        cout << "threshold t = " << t << " -> " << above << endl;
 
     f.report(cmd);
 }

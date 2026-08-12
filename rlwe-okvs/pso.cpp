@@ -340,7 +340,7 @@ Proto PsiCardReceiver::run(const std::vector<oc::block> &X,
     setTimePoint("Receiver::Cardinality");
 };
 
-Proto PsiCardSumSender::setup(Socket &chl)
+Proto PsiSumSender::setup(Socket &chl)
 {
     if (mSetupDone) {
         co_return;
@@ -352,14 +352,14 @@ Proto PsiCardSumSender::setup(Socket &chl)
     // The transfer OTs are random and their count is public, so they belong
     // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtSender.getLayoutSize();
-    co_await genRotSender(otSender, mPrng, chl, 2 * nSlots, mRot);
-    setTimePoint("PsiCardSumSender::Setup (transfer OTs)");
+    co_await genRotSender(otSender, mPrng, chl, nSlots, mRot);
+    setTimePoint("PsiSumSender::Setup (transfer OTs)");
 
     mSetupDone = true;
 };
 
-Proto PsiCardSumSender::run(const std::vector<oc::block> &Y,
-                            const std::vector<oc::u32> &payloads, Socket &chl)
+Proto PsiSumSender::run(const std::vector<oc::block> &Y,
+                        const std::vector<oc::u32> &payloads, Socket &chl)
 {
     if (payloads.size() != Y.size()) {
         throw RTE_LOC;
@@ -375,14 +375,13 @@ Proto PsiCardSumSender::run(const std::vector<oc::block> &Y,
 
     auto comm = chl.bytesSent() + chl.bytesReceived();
 
-    // One weight vector for the cardinality, one carrying the payload of the
-    // item at each slot (empty slots contribute nothing).
-    std::vector<std::vector<u32>> weights(2);
-    weights[0].assign(nSlots, 1);
-    weights[1].resize(nSlots);
+    // The weight at each slot is the payload of the item sitting there
+    // (empty slots contribute nothing).
+    std::vector<std::vector<u32>> weights(1);
+    weights[0].resize(nSlots);
     for (u64 s = 0; s < nSlots; ++s) {
         const uint32_t item = slotToItem[s];
-        weights[1][s] = (item == UINT32_MAX) ? 0u : payloads[item];
+        weights[0][s] = (item == UINT32_MAX) ? 0u : payloads[item];
     }
 
     std::vector<u32> shares;
@@ -390,12 +389,12 @@ Proto PsiCardSumSender::run(const std::vector<oc::block> &Y,
     co_await chl.send(std::move(shares));
 
     comm = chl.bytesSent() + chl.bytesReceived() - comm;
-    cout << "Card-sum phase takes " << comm << " bytes" << endl;
+    cout << "Sum phase takes " << comm << " bytes" << endl;
 
-    setTimePoint("Sender::Card Sum");
+    setTimePoint("Sender::Sum");
 };
 
-Proto PsiCardSumReceiver::setup(Socket &chl)
+Proto PsiSumReceiver::setup(Socket &chl)
 {
     if (mSetupDone) {
         co_return;
@@ -407,15 +406,14 @@ Proto PsiCardSumReceiver::setup(Socket &chl)
     // The transfer OTs are random and their count is public, so they belong
     // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtReceiver.getLayoutSize();
-    co_await genRotReceiver(otReceiver, mPrng, chl, 2 * nSlots, mRot);
-    setTimePoint("PsiCardSumReceiver::Setup (transfer OTs)");
+    co_await genRotReceiver(otReceiver, mPrng, chl, nSlots, mRot);
+    setTimePoint("PsiSumReceiver::Setup (transfer OTs)");
 
     mSetupDone = true;
 };
 
-Proto PsiCardSumReceiver::run(const std::vector<oc::block> &X,
-                              oc::u64 &cardinality, oc::u64 &payloadSum,
-                              Socket &chl)
+Proto PsiSumReceiver::run(const std::vector<oc::block> &X,
+                          oc::u64 &payloadSum, Socket &chl)
 {
     co_await setup(chl);
 
@@ -423,14 +421,13 @@ Proto PsiCardSumReceiver::run(const std::vector<oc::block> &X,
     co_await sspmtReceiver.run(X, sspmt, chl);
 
     std::vector<u32> shares;
-    co_await weightedSumReceiver(mRot, chl, sspmt, 2, shares);
+    co_await weightedSumReceiver(mRot, chl, sspmt, 1, shares);
 
     std::vector<u32> senderShares;
     co_await chl.recvResize(senderShares);
 
-    cardinality = (u32)(shares[0] - senderShares[0]);
-    payloadSum = (u32)(shares[1] - senderShares[1]);
-    setTimePoint("Receiver::Card Sum");
+    payloadSum = (u32)(shares[0] - senderShares[0]);
+    setTimePoint("Receiver::Sum");
 };
 
 Proto PsiThresholdSender::setup(Socket &chl)
