@@ -160,106 +160,6 @@ uint32_t SspmtSender::sequenceLayers(const std::vector<uint32_t> &itemBin,
   return static_cast<uint32_t>(used_bins.size());
 }
 
-uint32_t SspmtSender::sequenceLayersOptimal(
-    const std::vector<uint32_t> &itemBin,
-    const std::vector<uint32_t> &itemBlock, uint32_t numSlots,
-    uint32_t numBlocks, uint32_t spanBlocks,
-    std::vector<uint32_t> &itemToLayer, std::vector<uint32_t> &layerMinBlock,
-    std::vector<uint32_t> &layerMaxBlock) {
-  const uint32_t n = static_cast<uint32_t>(itemBin.size());
-  itemToLayer.assign(n, UINT32_MAX);
-  layerMinBlock.clear();
-  layerMaxBlock.clear();
-  if (n == 0) {
-    return 0;
-  }
-  const uint32_t b = numBlocks;
-  const uint32_t z = std::max<uint32_t>(spanBlocks, 1);
-
-  std::vector<std::vector<uint32_t>> block_items(b);
-  for (uint32_t i = 0; i < n; ++i) {
-    block_items[itemBlock[i]].push_back(i);
-  }
-
-  // --- Phase 1: how many windows, and where ---------------------------------
-  // cnt[x][bin] counts the items of that bin with block in [x, y] as y sweeps,
-  // and Mrun[x] = M([x, y]). pref[s] is the number of windows placed at starts
-  // <= s (final for s < y, since windows are only ever added at the current
-  // y). The supply reaching an interval [x, y] is total - pref[x-z], so the
-  // shortfall over all x is max_x (Mrun[x] + pref[x-z]) - total.
-  std::vector<std::vector<uint32_t>> cnt(b, std::vector<uint32_t>(numSlots, 0));
-  std::vector<uint32_t> Mrun(b, 0);
-  std::vector<uint64_t> pref(b, 0);
-  std::vector<uint32_t> anchors;
-  uint64_t total = 0;
-
-  for (uint32_t y = 0; y < b; ++y) {
-    for (uint32_t idx : block_items[y]) {
-      const uint32_t bin = itemBin[idx];
-      for (uint32_t x = 0; x <= y; ++x) {
-        const uint32_t c = ++cnt[x][bin];
-        if (c > Mrun[x]) {
-          Mrun[x] = c;
-        }
-      }
-    }
-
-    uint64_t need = 0;
-    for (uint32_t x = 0; x <= y; ++x) {
-      const uint64_t supplyBelow = (x >= z) ? pref[x - z] : 0;
-      need = std::max(need, (uint64_t)Mrun[x] + supplyBelow);
-    }
-    if (need > total) {
-      anchors.insert(anchors.end(), need - total, y);
-      total = need;
-    }
-    pref[y] = total;
-  }
-
-  // --- Phase 2: assign, leftmost admissible window first ---------------------
-  // Anchors are nondecreasing and each bin's items arrive in block order, so a
-  // single forward pointer per bin suffices: windows before it are either used
-  // by this bin or can no longer cover its remaining items.
-  const uint32_t L = static_cast<uint32_t>(anchors.size());
-  std::vector<uint32_t> ptr(numSlots, 0);
-  std::vector<uint32_t> lmin(L, UINT32_MAX), lmax(L, 0);
-
-  for (uint32_t y = 0; y < b; ++y) {
-    for (uint32_t idx : block_items[y]) {
-      const uint32_t bin = itemBin[idx];
-      uint32_t &p = ptr[bin];
-      const uint32_t lo = (y >= z - 1) ? (y - z + 1) : 0;
-      while (p < L && anchors[p] < lo) {
-        ++p;
-      }
-      if (p == L || anchors[p] > y) {
-        // Only reachable if a Hall constraint was violated, which phase 1
-        // rules out.
-        throw RTE_LOC;
-      }
-      itemToLayer[idx] = p;
-      lmin[p] = std::min(lmin[p], y);
-      lmax[p] = std::max(lmax[p], y);
-      ++p;
-    }
-  }
-
-  // --- Phase 3: drop the windows no item landed in --------------------------
-  std::vector<uint32_t> remap(L, UINT32_MAX);
-  uint32_t kept = 0;
-  for (uint32_t l = 0; l < L; ++l) {
-    if (lmin[l] != UINT32_MAX) {
-      remap[l] = kept++;
-      layerMinBlock.push_back(lmin[l]);
-      layerMaxBlock.push_back(lmax[l]);
-    }
-  }
-  for (uint32_t i = 0; i < n; ++i) {
-    itemToLayer[i] = remap[itemToLayer[i]];
-  }
-  return kept;
-}
-
 namespace {
 
 // caps[g-1] = D(g)+1, the per-bin item count a length-g block interval has to
@@ -374,16 +274,10 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
   // The realized layer count is a function of Y (its collision structure), so
   // it is padded up to the public budget before anything leaves this party.
   //
-  // The budget bounds the *minimum* layer count, so overshooting it with the
-  // greedy is not yet the abort event: fall back to the optimal sequencing
-  // first. (The greedy has matched the optimum on every instance we have
-  // measured, so this path is not expected to run -- but the 2^-lambda abort
-  // guarantee should not rest on that.)
-  if (mNumRealLayers > mLayerBudget) {
-    mNumRealLayers = sequenceLayersOptimal(
-        item_binidx, mItemToBlockIdx, mNumSlots, mNumBatch, mSpanBlocks,
-        mItemToLayerIdx, mLayerMinBlock, mLayerMaxBlock);
-  }
+  // The budget bounds the *minimum* layer count, and sequenceLayers provably
+  // attains that minimum on every input (docs/sequencing-note.tex,
+  // thm:greedy), so exceeding the budget is exactly the L* > budget event
+  // that resolveLayerBudget caps at 2^-lambda: abort.
   if (mNumRealLayers > mLayerBudget) {
     std::cout << "sequencing: " << mNumRealLayers << " layers exceed the "
               << mLayerBudget << " layer budget" << std::endl;

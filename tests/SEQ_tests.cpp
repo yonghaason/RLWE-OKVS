@@ -129,18 +129,6 @@ void opti_sequencing_test(const oc::CLP& cmd)
         };
         checkFeasible(L, itemToLayer, layerMin, layerMax);
 
-        // The optimal sequencer has to be feasible too, and to hit the bound.
-        std::vector<uint32_t> optToLayer, optMin, optMax;
-        uint64_t Lopt = SspmtSender::sequenceLayersOptimal(
-            bins, blks, N, b, W, optToLayer, optMin, optMax);
-        checkFeasible(Lopt, optToLayer, optMin, optMax);
-        if (Lopt != LB) {
-            std::cout << "OPT-alg mismatch: N=" << N << " b=" << b << " W=" << W
-                      << " n=" << n << " opt=" << Lopt << " dual=" << LB
-                      << std::endl;
-            throw RTE_LOC;
-        }
-
         if (L != LB) {
             std::cout << "OPT mismatch: N=" << N << " b=" << b << " W=" << W
                       << " n=" << n << " greedy=" << L << " dual=" << LB
@@ -184,19 +172,9 @@ void opti_sequencing_test(const oc::CLP& cmd)
         uint64_t L = SspmtSender::sequenceLayers(bins, blks, N, W, itemToLayer,
                                                  layerMin, layerMax);
         timer.setTimePoint("greedy");
-        std::vector<uint32_t> optToLayer, optMin, optMax;
-        uint64_t Lopt = SspmtSender::sequenceLayersOptimal(
-            bins, blks, N, (uint32_t)(m / N), W, optToLayer, optMin, optMax);
-        timer.setTimePoint("optimal");
         uint64_t LB = sequencingLowerBound(bins, blks, N, W);
         timer.setTimePoint("dual");
         if (cmd.isSet("v")) std::cout << timer << std::endl;
-
-        if (Lopt != LB) {
-            std::cout << "OPT-alg mismatch on production-size instance: opt="
-                      << Lopt << " dual=" << LB << std::endl;
-            throw RTE_LOC;
-        }
 
         uint32_t maxload = 0;
         {
@@ -204,9 +182,8 @@ void opti_sequencing_test(const oc::CLP& cmd)
             for (u64 i = 0; i < n; ++i) maxload = std::max(maxload, ++cnt[bins[i]]);
         }
 
-        std::cout << "  run " << r << ": greedy L=" << L << ", optimal L="
-                  << Lopt << ", dual LB=" << LB << ", max bin load=" << maxload
-                  << std::endl;
+        std::cout << "  run " << r << ": greedy L=" << L << ", dual LB=" << LB
+                  << ", max bin load=" << maxload << std::endl;
 
         if (L != LB) {
             std::cout << "OPT mismatch on production-size instance" << std::endl;

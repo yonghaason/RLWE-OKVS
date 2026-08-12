@@ -1,0 +1,280 @@
+% ===========================================================================
+% Layer budget: main-body lemma + appendix proof, for the KKLS paper.
+%
+% Usage: the block between MAIN BODY markers goes next to the sequencing
+% algorithm (assumed to be \Cref{alg:sequencing}: process blocks left to
+% right, place each item into the admissible layer of smallest anchor whose
+% bin is free, open a new layer anchored at the current block when none is);
+% the block between APPENDIX markers goes into the appendix, replacing
+% \Cref{app:Lprime} with the actual label scheme.
+%
+% Notation assumed from the paper: n sender set size, N slot count, m OKVS
+% length (N | m), b = m/N blocks, zeta span limit, lambda statistical
+% parameter. Rename \lambda to \lambda_s if that is the paper's convention.
+%
+% Needs amsmath and the llncs theorem environments (lemma, proposition,
+% claim, remark, proof). No custom macros beyond the two \providecommand
+% below.
+% ===========================================================================
+
+\providecommand{\Bin}{\mathrm{Bin}}
+\providecommand{\ext}{\mathrm{ext}}
+
+% ======================== MAIN BODY ========================================
+
+\begin{lemma}[Layer budget]
+\label{lemma:Lprime}
+Let $N \mid m$, $b = m/N$, $\zeta \ge 1$, and let the starting points
+$a_1, \dots, a_n$ be drawn independently and uniformly from $[m]$. For
+$g \in [b]$ define the binomial cap
+\[
+  C(g) \;=\; \min\Big\{ k \in \mathbb{N} \;:\;
+     \Pr\big[\, \Bin(n,\, g/m) \ge k \,\big]
+     \;\le\; \frac{2^{-\lambda}}{N b^2} \Big\},
+\]
+and set
+\[
+  L'(n, N, m, \zeta)
+  \;=\; \max_{1 \le g \le b}
+     \left\lceil \frac{\big(C(g)+1\big)\,(b+\zeta-1)}{g+\zeta-1} \right\rceil .
+\]
+Then the number $L$ of matrices output by \Cref{alg:sequencing} on
+$\{a_i\}_{i \in [n]}$ with span limit $\zeta$ satisfies
+\[
+  \Pr\big[\, L > L' \,\big] \;\le\; 2^{-\lambda}.
+\]
+\end{lemma}
+
+\begin{proof}[Proof sketch]
+The proof splits into a deterministic and a probabilistic half. The
+deterministic half bounds the output of \Cref{alg:sequencing} on \emph{every}
+input by a combinatorial quantity: whenever the algorithm opens a layer, the
+blocked bin exhibits a block interval that already holds as many same-bin
+items as there are layers anchored within its reach, and these local
+certificates compose, without double counting, into a family of intervals
+with pairwise disjoint reach whose item demands add up to the layer count.
+The probabilistic half caps the demand of every one of the at most $N b^2$
+(bin, interval) pairs by the exact binomial quantile $C(|J|)$, via a union
+bound; any disjoint family then totals at most $L'$. The full proof is in
+\Cref{app:Lprime}.
+\end{proof}
+
+% ======================== APPENDIX =========================================
+
+\section{Proof of \Cref{lemma:Lprime}}
+\label{app:Lprime}
+
+Throughout, write each starting point as $a = (\beta - 1)N + \tau$ with
+\emph{bin} $\tau \in [N]$ and \emph{block} $\beta \in [b]$; when the $a_i$
+are uniform over $[m]$, the pairs $(\tau_i, \beta_i)$ are independent and
+uniform over $[N] \times [b]$. We use three properties of
+\Cref{alg:sequencing}, immediate from its description:
+
+\begin{itemize}
+  \item[(P1)] items are processed in nondecreasing block order, and a layer
+        is opened during the processing of its \emph{anchor} block; anchors
+        are therefore created in nondecreasing order, a layer anchored at
+        $s$ admits exactly the blocks $[s, s+\zeta-1]$, and no layer
+        anchored at $s$ is created after block $s$ has been processed;
+  \item[(P2)] an item $(\tau, \beta)$ scans the existing layers with anchor
+        in $[\beta-\zeta+1, \beta]$ in order of anchor and joins the first
+        one whose bin $\tau$ is free; if all are occupied it opens a new
+        layer anchored at $\beta$. In particular, if it settles at anchor
+        $s$, then every layer that existed at that moment with anchor in
+        $[\beta-\zeta+1, s-1]$ was $\tau$-occupied at that moment;
+  \item[(P3)] an occupied (layer, bin) slot never vacates, and a layer holds
+        at most one item per bin.
+\end{itemize}
+
+For a block interval $J = [x, y] \subseteq [b]$ with $|J| = g$, let
+\[
+  n_\tau(J) = \#\{ i : \tau_i = \tau,\ \beta_i \in J \},
+  \qquad
+  M(J) = \max_{\tau \in [N]} n_\tau(J),
+  \qquad
+  \ext(J) = [x - \zeta + 1,\; y],
+\]
+so that $\ext(J)$ --- an interval of $g+\zeta-1$ anchor values --- consists
+of exactly the anchors whose layers admit some block of $J$. Call a family
+$J_1, \dots, J_K$ of block intervals \emph{admissible} if the extensions
+$\ext(J_k)$ are pairwise disjoint, and define the \emph{certificate value}
+\[
+  D(p) \;=\; \max\Big\{ \textstyle\sum_{k=1}^{K} M(J_k) \;:\;
+     J_1, \dots, J_K \text{ admissible},\ \max_k y_k \le p \Big\},
+\]
+with the empty family ($D(p) \ge 0$) allowed. The proof has two independent
+halves: a deterministic bound of the algorithm's output by $D(b)$
+(\Cref{prop:det}), and a probabilistic bound of $D(b)$ by $L'$
+(\Cref{prop:prob}). \Cref{lemma:Lprime} follows by combining them.
+
+\subsection{The deterministic half}
+
+\begin{proposition}
+\label{prop:det}
+On every input, the number of layers opened by \Cref{alg:sequencing} is at
+most $D(b)$.
+\end{proposition}
+
+The engine of the proof is a structural property of the failure events. Fix
+a moment at which the algorithm, holding the layer multiset $\Lambda$, fails
+to place an item $t$ of bin $\tau$ at block $y$ and hence opens a new layer.
+Write $a(\ell)$ for the anchor of a layer $\ell$.
+
+\begin{claim}[Blocking structure]
+\label{claim:blocking}
+There is an $X \le y - \zeta + 1$ such that (i) the layers of $\Lambda$
+with $a(\ell) \ge X$ all have $a(\ell) \in [X, y]$, and each of them is
+$\tau$-occupied by an item with block in $[X+\zeta-1,\, y]$; (ii)
+consequently, with $K = |\{\ell \in \Lambda : a(\ell) \ge X\}|$ and counting
+$t$ itself, the items processed so far satisfy
+$M([X+\zeta-1,\, y]) \ge K + 1$.
+\end{claim}
+
+\begin{proof}
+Build a closure. Maintain a collection of \emph{ranges} of anchors,
+initially the single range $[y-\zeta+1,\, y]$; whenever a layer
+$\ell \in \Lambda$ has its anchor inside a known range, absorb it: we argue
+below that $\ell$ is $\tau$-occupied, by a unique item (its \emph{witness},
+unique by (P3)) with block $\beta_\ell$; add the range
+$[\beta_\ell - \zeta + 1,\; s_\ell]$, where $s_\ell = a(\ell)$. Iterate to a
+fixpoint; let $X$ be the least left endpoint of any range.
+
+\emph{Every absorbed layer is $\tau$-occupied.} Induct over the absorption
+order. A layer absorbed by the initial range was admissible to $t$, and $t$
+failed. Otherwise $\ell$'s anchor lies in $[\beta_p - \zeta + 1, s_p]$ for
+an earlier witness $p$. If $a(\ell) < s_p$: by (P1), $\ell$ was opened while
+block $a(\ell) < s_p \le \beta_p$ was current --- before $p$ was processed
+--- so at $p$'s turn it existed, was admissible
+($a(\ell) \ge \beta_p - \zeta + 1$), and preceded $p$'s layer in the
+smallest-anchor-first scan; by (P2), $p$ passing it over means it was
+$\tau$-occupied then, hence still, by (P3). If $a(\ell) = s_p$: either
+$\ell$ is $p$'s own layer, occupied by $p$; or trace how $p$'s layer was
+absorbed --- through a range containing $s_p$ strictly below its endpoint,
+in which case the previous case applies to $\ell$ verbatim; through the
+initial range, so $a(\ell) \in [y-\zeta+1, y]$ and $t$'s failure applies; or
+through another witness's endpoint $s_q = s_p$, and we ascend to $q$. The
+ascent follows the absorption order, so it terminates in one of the resolved
+cases.
+
+\emph{The ranges cover exactly $[X, y]$.} A new range
+$[\beta_\ell - \zeta + 1, s_\ell]$ contains $s_\ell$ (an item's block is
+within $\zeta - 1$ of its layer's anchor), which lies in the range that
+absorbed $\ell$; so the union stays a single interval, and its right end
+stays $y$, since by (P1) no anchor exceeds the current block.
+
+Consequently every layer with $a(\ell) \ge X$ has $a(\ell) \in [X, y]$, is
+covered by a range, and was absorbed at the fixpoint --- which is (i), since
+each witness has $\beta_\ell - \zeta + 1 \ge X$ (its range's left endpoint
+is one of those $X$ minimizes over), i.e.
+$\beta_\ell \ge X + \zeta - 1$. For (ii): the witnesses are distinct (one
+per layer, by (P3)), all of bin $\tau$, with blocks in $[X+\zeta-1, y]$;
+together with $t$ (block $y \ge X + \zeta - 1$) they number $K + 1$.
+\end{proof}
+
+\begin{proof}[Proof of \Cref{prop:det}]
+Write $G(p)$ for the number of layers with anchor $\le p$ opened so far. We
+show by induction over the processed items that
+\begin{equation}
+  \label{eq:invariant}
+  G(p) \;\le\; D(p) \qquad \text{for every } p,
+\end{equation}
+where $G$, $D$, $M$ all refer to the current prefix of items. Initially both
+sides vanish. Placing an item into an existing layer changes no $G(p)$ and
+never decreases $D(p)$, since an added item only increases the counts
+$M(J)$. Suppose an item $t$ (bin $\tau$, block $y$) triggers a new layer,
+and let $X$, $K$ be as in \Cref{claim:blocking}. For $p < y$ nothing
+changes: the new anchor is $y$. For $p \ge y$, take an admissible family
+with right endpoints $\le X - 1$ certifying $G(X-1)$, by induction (empty if
+$X \le 1$), and adjoin $J_0 = [X + \zeta - 1,\, y]$: its extension
+$\ext(J_0) = [X, y]$ is disjoint from the previous extensions
+$\subseteq (-\infty, X-1]$, and $M(J_0) \ge K + 1$ by
+\Cref{claim:blocking}(ii), counting $t$. The family's value is now at least
+$G(X-1) + K + 1$, which by \Cref{claim:blocking}(i) is exactly the new
+$G(p)$: the previous layers split into those anchored $\le X - 1$ and the
+$K$ anchored in $[X, y]$.
+
+At termination, all anchors lie in $[b]$, so the layer count is
+$G(b) \le D(b)$.
+\end{proof}
+
+\subsection{The probabilistic half}
+
+\begin{proposition}
+\label{prop:prob}
+Let $E$ be the event that $n_\tau(J) \le C(|J|)$ for every bin
+$\tau \in [N]$ and every block interval $J \subseteq [b]$. Then
+$\Pr[\lnot E] \le 2^{-\lambda}$, and on $E$,
+\[
+  D(b) \;\le\; L'(n, N, m, \zeta).
+\]
+\end{proposition}
+
+\begin{proof}
+Fix $\tau$ and $J$ with $|J| = g$. Exactly $g$ of the $m$ starting points
+map to bin $\tau$ with block in $J$ (one per block of $J$), so
+$n_\tau(J) \sim \Bin(n, g/m)$, and by the definition of $C(g)$,
+\[
+  \Pr\big[\, n_\tau(J) > C(g) \,\big] \;\le\; \frac{2^{-\lambda}}{N b^2}.
+\]
+There are $N$ bins and at most $b^2$ intervals, so a union bound gives
+$\Pr[\lnot E] \le 2^{-\lambda}$.
+
+Now condition on $E$ and set
+$\rho = \max_{1 \le g \le b} \frac{C(g)+1}{g+\zeta-1}$, so that
+$C(g) \le \rho\,(g+\zeta-1) - 1$ for every $g$ and
+$L' = \lceil \rho\,(b+\zeta-1) \rceil$. Let $J_1, \dots, J_K$ be any
+admissible family. The extensions are pairwise disjoint subintervals of the
+anchor range $[2-\zeta,\, b]$, whose length is $b+\zeta-1$, so their
+lengths $g_k + \zeta - 1$ sum to at most $b+\zeta-1$. Hence, on $E$,
+\[
+  \sum_{k=1}^{K} M(J_k)
+  \;\le\; \sum_{k=1}^{K} C(g_k)
+  \;\le\; \sum_{k=1}^{K} \big( \rho\,(g_k+\zeta-1) - 1 \big)
+  \;\le\; \rho\,(b+\zeta-1)
+  \;\le\; L',
+\]
+and taking the maximum over families gives $D(b) \le L'$.
+\end{proof}
+
+\begin{proof}[Proof of \Cref{lemma:Lprime}]
+By \Cref{prop:det}, deterministically $L \le D(b)$; by \Cref{prop:prob},
+$D(b) \le L'$ except with probability $2^{-\lambda}$.
+\end{proof}
+
+\subsection{Remarks}
+
+\begin{remark}[Optimality of the sequencer]
+\label{rem:optimality}
+The deterministic half is tight in a strong sense. For any layering of the
+items --- any assignment to span-$\zeta$, one-item-per-bin layers --- and any
+admissible family, the $M(J_k)$ items of $J_k$'s heaviest bin occupy
+$M(J_k)$ distinct layers anchored in $\ext(J_k)$, and the extensions are
+disjoint, so every layering uses at least $D(b)$ layers. Combined with
+\Cref{prop:det}, the output of \Cref{alg:sequencing} is therefore
+\emph{exactly} the minimum layer count: the left-to-right first-fit rule is
+an exact algorithm, not a heuristic, and the bound of
+\Cref{lemma:Lprime} applies verbatim to any optimal sequencer.
+\end{remark}
+
+\begin{remark}[Restricted starting range]
+\label{rem:range}
+If the starting points are instead uniform over a prefix $[m']$ with
+$m' \le m$ --- in KKLS, $m' = m - w + 1$, since a band of width $w$ must fit
+inside the encoding --- the lemma holds with $m$ replaced by $m'$ in the
+definition of $C(g)$: at most $g$ of the $m'$ admissible values map to a
+given (bin, interval) pair, so $n_\tau(J)$ is stochastically dominated by
+$\Bin(n, g/m')$, and the proof is unchanged.
+\end{remark}
+
+\begin{remark}[Computing $L'$]
+\label{rem:computing}
+$L'$ is a closed-form function of the public parameters
+$(n, N, m, \zeta, \lambda)$, so both parties evaluate it locally and agree
+on it without interaction --- which is what makes the padded count
+simulatable. The binomial tails are summed exactly, term by term in log
+space (the levels involved, around $2^{-\lambda}/(Nb^2)$, are far below
+floating-point underflow but pose no difficulty in log space), $C(g)$ is
+nondecreasing in $g$ so one sweep over $g \in [b]$ amortizes the quantile
+searches, and the final maximum is taken in integer arithmetic; the whole
+computation takes milliseconds.
+\end{remark}
