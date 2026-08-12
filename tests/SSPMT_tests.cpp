@@ -124,3 +124,120 @@ void sspmt_test(const oc::CLP& cmd)
                   << std::endl;
     }
 }
+
+// Two-process variant of sspmt_test: each process runs ONE party and they
+// talk over a real TCP connection, so the link in between can be shaped
+// (e.g. the netns+veth WAN emulation in experiments/wan_netns.sh) without
+// touching the host's interfaces.
+//
+//   terminal 1:  ./run -u 7 -role sender -ip 10.99.0.1:1212 -nn 20 -v
+//   terminal 2:  ./run -u 7 -role recver -ip 10.99.0.1:1212 -nn 20 -v
+//
+// The sender listens on -ip (its own address); the receiver connects to it.
+// Both processes derive X and Y from the same fixed seed, so no coordination
+// is needed. After the protocol (and outside the timed region) the sender
+// ships its share vector over for the same |X n Y| ground-truth check as
+// sspmt_test.
+void sspmt_net_test(const oc::CLP& cmd)
+{
+    u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
+    u64 nt = cmd.getOr("nt", 1);
+    u64 inter = cmd.getOr("inter", n / 2);
+
+    string role = cmd.getOr<string>("role", "");
+    if (role != "sender" && role != "recver")
+        throw std::runtime_error(
+            "sspmt_net_test needs -role sender|recver (and both processes "
+            "must agree on -ip <sender-addr:port>, -nn, -inter)");
+    bool isSender = (role == "sender");
+
+    string ip = cmd.getOr<string>("ip", "127.0.0.1:1212");
+
+    u64 paramN = (n == (1ull << 16) || n == (1ull << 18) ||
+                  n == (1ull << 20) || n == (1ull << 22))
+                     ? n
+                     : (1ull << 16);
+    sspmtParams params;
+    params.initialize(paramN);
+    params.bandWidth = cmd.getOr("w", params.bandWidth);
+    params.bandExpansion = cmd.getOr("m_r", params.bandExpansion);
+    params.span_blocks = cmd.getOr("seq_span", params.span_blocks);
+
+    // Same fixed seed as sspmt_test: both processes regenerate identical
+    // X, Y without communicating.
+    PRNG prng(block(9871234, 1276353));
+    vector<block> X(n), Y(n);
+    prng.get(X.data(), X.size());
+    prng.get(Y.data(), Y.size());
+    for (u64 i = 0; i < inter; ++i) Y[i] = X[i];
+
+    macoro::thread_pool pool;
+    auto e = pool.make_work();
+    pool.create_threads(nt);
+
+    // The sender doubles as the TCP server.
+    auto sock = coproto::asioConnect(ip, isSender);
+    sock.setExecutor(pool);
+
+    oc::Timer timer;
+    oc::BitVector share;
+
+    if (isSender)
+    {
+        SspmtSender sender;
+        sender.setTimer(timer);
+        sender.init(n, n, params, block(555, 1) /*party seed*/);
+        auto p = sender.run(Y, share, sock);
+        macoro::sync_wait(std::move(p) | macoro::start_on(pool));
+
+        // Untimed: hand the receiver our share so it can verify.
+        std::vector<u8> buf(share.sizeBytes());
+        memcpy(buf.data(), share.data(), buf.size());
+        macoro::sync_wait(sock.send(coproto::copy(buf)));
+
+        if (cmd.isSet("v"))
+        {
+            u64 L = sender.getNumLayers();
+            u64 layout = sender.getLayoutSize();
+            std::cout << "n = " << n << ", intersection = " << inter << std::endl;
+            std::cout << "L (layers) = " << L
+                      << ", H (slots) = " << params.heNumSlots
+                      << ", L*H = " << layout << std::endl;
+        }
+    }
+    else
+    {
+        SspmtReceiver recver;
+        recver.setTimer(timer);
+        recver.init(n, n, params, block(555, 2) /*party seed*/);
+        auto p = recver.run(X, share, sock);
+        macoro::sync_wait(std::move(p) | macoro::start_on(pool));
+
+        std::vector<u8> buf(oc::divCeil(share.size(), 8));
+        macoro::sync_wait(sock.recv(buf));
+        oc::BitVector senderShare(buf.data(), share.size());
+
+        oc::BitVector flags = share;
+        flags ^= senderShare;
+        u64 matches = 0;
+        for (u64 i = 0; i < flags.size(); ++i)
+            matches += flags[i];
+        if (matches != inter)
+        {
+            std::cout << "wrong match count: got " << matches
+                      << ", expected " << inter << std::endl;
+            throw RTE_LOC;
+        }
+        std::cout << "verified: |X n Y| = " << matches << std::endl;
+    }
+
+    if (cmd.isSet("v"))
+    {
+        std::cout << "[" << role << "]" << std::endl;
+        std::cout << timer << std::endl;
+        double recvByte = sock.bytesReceived();
+        double sentByte = sock.bytesSent();
+        std::cout << "recv " << recvByte / 1024.0 / 1024.0 << " MB, sent "
+                  << sentByte / 1024.0 / 1024.0 << " MB" << std::endl;
+    }
+}
