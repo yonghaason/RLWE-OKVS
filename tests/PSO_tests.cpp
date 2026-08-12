@@ -132,7 +132,7 @@ struct PsoFixture
 
 }  // namespace
 
-void psu_protocol_test(const oc::CLP& cmd)
+void psu_test(const oc::CLP& cmd)
 {
     PsoFixture f(cmd);
 

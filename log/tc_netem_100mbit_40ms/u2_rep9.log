@@ -1,0 +1,40 @@
+=== u=2 rep=9 start 04:10:20 ===
+2 - [1m[34mSSPMT_test                       [0mReceiver sends 261 Ctxts of OKVS Encoding
+Sender receives 261 Ctxts of OKVS Encoding, 50362425 Bytes
+Sender sends 252 decoded ctxts, 64158694 Bytes
+Return noise budget: 3 - 3 bits
+n = 1048576, intersection = 524288
+L (layers) = 252, H (slots) = 8192, L*H = 2064384
+equality instances / n = 1.96875  (this is the L*H / n_y blow-up)
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::Setup (flooded masks)                       260.0    260.017  ******
+Gmw::generateTriple begin                           265.6      5.541  **
+Gmw::generateTriple end                            9500.0   9234.471  **********
+Sender::Setup (GMW triples)                        9500.0      0.001  
+Sender::Generate Bands                             9668.6    168.592  ******
+Sender::Sequencing                                 9700.9     32.236  ****
+Sender::HE Encode                                 10364.1    663.213  *******
+Sender::Recv ctxts & Serialize                    10545.4    181.351  ******
+Sender::Encrypted OKVS Decoding & Send Back       13558.2   3012.733  *********
+Sender::Online GMW                                13661.5    103.307  *****
+
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Gmw::generateTriple begin                   6.9      6.884  **
+Gmw::generateTriple end                  9555.6   9548.715  **********
+Receiver::Setup (GMW triples)            9555.6      0.002  
+Receiver::OKVS Encoding                 10323.1    767.453  *******
+Receiver::Encryption & Send             10542.1    219.029  ******
+Receiver::Recv back and Serialize       13560.5   3018.461  *********
+Receiver::Decrypt                       13642.5     81.948  *****
+Receiver::Online GMW                    13661.4     18.948  ***
+
+83.454 + 115.717 = 199.172 MB 
+[1m[32m  Passed[0m   13723ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0mwall 13.83 s  user 22.02 s  sys 1.54 s
+=== end 04:10:34 ===

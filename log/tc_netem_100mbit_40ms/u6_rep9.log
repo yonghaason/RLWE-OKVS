@@ -1,0 +1,68 @@
+=== u=6 rep=9 start 04:10:34 ===
+6 - [1m[34mPSU_test                         [0mReceiver sends 261 Ctxts of OKVS Encoding
+Sender receives 261 Ctxts of OKVS Encoding, 50362405 Bytes
+Sender sends 252 decoded ctxts, 64158532 Bytes
+Return noise budget: 3 - 3 bits
+PermuteShare + FinalOT(PSU) takes 647192 bytes
+
+-------ssPMT Params-------
+n: 1048576, intersection: 524288
+w: 44, m/n: 1.7, seq_span: 74
+layer budget: 252 (blocks b = 218)
+--------------------------
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::Setup begin                                  18.8     18.844  ***
+Sender::Setup (flooded masks)                       279.5    260.693  ******
+Gmw::generateTriple begin                           285.7      6.183  **
+Gmw::generateTriple end                            9352.8   9067.053  **********
+Sender::Setup (GMW triples)                        9352.8      0.001  
+PermuteShareSender::Setup (switch OTs)            11769.2   2416.379  *********
+PermuteShareSender::Benes routing                 12238.6    469.405  *******
+PS.S: online begin                                12238.6      0.001  
+PS.S: switches as bitvec                          12267.0     28.394  ****
+PS.S: recv corrections                            12512.1    245.178  ******
+PS.S: apply corrections                           12551.5     39.339  ****
+PS.S: masked eval                                 12803.5    252.043  ******
+PermuteShareSender::Correlate                     12805.2      1.658  *
+PsuSender::Setup (transfer OTs)                   12865.1     59.949  ****
+Sender::Generate Bands                            13029.7    164.533  ******
+Sender::Sequencing                                13059.4     29.756  ****
+Sender::HE Encode                                 13716.8    657.365  *******
+Sender::Recv ctxts & Serialize                    13873.9    157.071  ******
+Sender::Encrypted OKVS Decoding & Send Back       16857.5   2983.631  *********
+Sender::Online GMW                                16968.7    111.232  *****
+PermuteShareSender::Apply                         16974.8      6.127  **
+Sender::Final OT PSU                              17014.9     40.068  ****
+
+Label                                        Time (ms)  diff (ms)
+__________________________________
+Receiver::Setup begin                             20.0     20.010  ***
+Gmw::generateTriple begin                         26.6      6.638  **
+Gmw::generateTriple end                         9388.5   9361.854  **********
+Receiver::Setup (GMW triples)                   9388.5      0.002  
+PermuteShareReceiver::Setup (switch OTs)       11768.8   2380.252  *********
+PS.R: online begin                             11777.9      9.155  **
+PS.R: recv bitcorrection                       12268.8    490.860  *******
+PS.R: copy+swap sot                            12315.6     46.787  ****
+PS.R: prepare corrections                      12485.7    170.095  ******
+PS.R: pack corrections                         12510.8     25.180  ****
+PermuteShareReceiver::Online                   12512.2      1.354  
+PermuteShareReceiver::Correlate                12513.9      1.665  *
+PsuReceiver::Setup (transfer OTs)              12867.1    353.229  ******
+Receiver::OKVS Encoding                        13634.2    767.092  *******
+Receiver::Encryption & Send                    13870.9    236.684  ******
+Receiver::Recv back and Serialize              16863.7   2992.867  *********
+Receiver::Decrypt                              16949.6     85.872  *****
+Receiver::Online GMW                           16968.7     19.146  ***
+PermuteShareReceiver::Apply                    16968.8      0.067  
+Receiver::Final OT PSU                         17024.9     56.111  ****
+
+comm: offline 43.213 MB + online 183.913 MB = 227.126 MB   (sender->receiver 137.262, receiver->sender 89.864)
+[1m[32m  Passed[0m   17430ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0mwall 17.55 s  user 27.01 s  sys 2.54 s
+=== end 04:10:51 ===

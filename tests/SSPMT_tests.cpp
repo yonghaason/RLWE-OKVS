@@ -5,6 +5,9 @@
 #include "cryptoTools/Common/CLP.h"
 #include "cryptoTools/Common/Timer.h"
 #include "cryptoTools/Crypto/PRNG.h"
+#ifdef COPROTO_ENABLE_BOOST
+#include <coproto/Socket/AsioSocket.h>
+#endif
 #include "coproto/Socket/LocalAsyncSock.h"
 
 #include "macoro/sync_wait.h"
@@ -26,7 +29,7 @@ using namespace rlweOkvs;
 // reconstructs to 1 iff the Y-item sitting there is in X, and empty slots
 // reconstruct to 0, so the reconstructed bits sum to exactly |X n Y| -- which
 // is the ground truth we check, without needing the sender's internal layout.
-void sspmt_fulllayout_protocol_test(const oc::CLP& cmd)
+void sspmt_test(const oc::CLP& cmd)
 {
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
     u64 nt = cmd.getOr("nt", 1);
@@ -58,7 +61,8 @@ void sspmt_fulllayout_protocol_test(const oc::CLP& cmd)
     auto e1 = pool1.make_work();
     pool1.create_threads(nt);
 
-    auto socket = coproto::LocalAsyncSocket::makePair();
+    auto socket = coproto::AsioSocket::makePair();
+    // auto socket = coproto::LocalAsyncSocket::makePair();
     socket[0].setExecutor(pool0);
     socket[1].setExecutor(pool1);
 
