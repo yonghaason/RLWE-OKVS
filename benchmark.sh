@@ -93,7 +93,9 @@ ip -n $NS1 link set $V1 up
 for pair in "$NS0 $V0" "$NS1 $V1"; do
     set -- $pair
     ip netns exec $1 tc qdisc add dev $2 root handle 1: htb default 10
-    ip netns exec $1 tc class add dev $2 parent 1: classid 1:10 htb rate $RATE ceil $RATE
+    # quantum only matters when several classes share the link; we have one
+    # class, so pin it to a sane value to silence the kernel's r2q warning.
+    ip netns exec $1 tc class add dev $2 parent 1: classid 1:10 htb rate $RATE ceil $RATE quantum 60000
     ip netns exec $1 tc qdisc add dev $2 parent 1:10 handle 10: netem delay $DELAY limit $LIMIT
 done
 echo "link: $RATE per direction, latency $LAT (RTT $(awk -v d="${DELAY%ms}" 'BEGIN{print 2*d}') ms)"
