@@ -232,6 +232,10 @@ void sspmt_net_test(const oc::CLP& cmd)
         std::cout << "verified: |X n Y| = " << matches << std::endl;
     }
 
+    // coproto aborts if the socket is destroyed with operations still in
+    // flight; drain it before it goes out of scope.
+    macoro::sync_wait(sock.flush());
+
     if (cmd.isSet("v"))
     {
         std::cout << "[" << role << "]" << std::endl;

@@ -81,19 +81,29 @@ run)
     ip netns exec $NS0 ip tcp_metrics flush || true
     ip netns exec $NS1 ip tcp_metrics flush || true
 
+    # Clear out any processes a previous (crashed) run left in the namespaces.
+    ip netns pids $NS0 2>/dev/null | xargs -r kill 2>/dev/null || true
+    ip netns pids $NS1 2>/dev/null | xargs -r kill 2>/dev/null || true
+
     SLOG="$LOGDIR/last_sender.log"; RLOG="$LOGDIR/last_recver.log"
+    set +e
     ip netns exec $NS0 sudo -u $RUNUSER "$BIN" -u $TEST_IDX \
         -role sender -ip $IP0:$PORT "$@" > "$SLOG" 2>&1 &
     SPID=$!
     sleep 0.5
     ip netns exec $NS1 sudo -u $RUNUSER "$BIN" -u $TEST_IDX \
         -role recver -ip $IP0:$PORT "$@" > "$RLOG" 2>&1
+    RRC=$?
     wait $SPID
+    SRC=$?
+    set -e
     chown $RUNUSER "$SLOG" "$RLOG" 2>/dev/null || true
     echo "==================== sender ===================="
     cat "$SLOG"
     echo "==================== recver ===================="
     cat "$RLOG"
+    if [ $SRC -ne 0 ]; then echo "!! sender exited with code $SRC"; fi
+    if [ $RRC -ne 0 ]; then echo "!! recver exited with code $RRC"; fi
     ;;
 
 status)

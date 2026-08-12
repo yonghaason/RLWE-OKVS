@@ -209,6 +209,11 @@ struct NetPsoFixture
         setupRecv = sock.bytesReceived();
     }
 
+    // coproto aborts the process if a socket is destroyed with operations
+    // still in flight, and a sender's last protocol action is a send; drain
+    // the socket before it goes out of scope.
+    void finish() { runOne(sock.flush()); }
+
     void report(const oc::CLP& cmd)
     {
         if (!cmd.isSet("v")) return;
@@ -397,6 +402,7 @@ void psu_net_test(const oc::CLP& cmd)
         cout << "verified: |D| = " << D.size() << endl;
     }
 
+    f.finish();
     f.report(cmd);
 }
 
@@ -428,6 +434,7 @@ void psi_card_net_test(const oc::CLP& cmd)
         cout << "verified: PSI cardinality = " << cardinality << endl;
     }
 
+    f.finish();
     f.report(cmd);
 }
 
@@ -466,6 +473,7 @@ void psi_sum_net_test(const oc::CLP& cmd)
         cout << "verified: PSI sum = " << payloadSum << endl;
     }
 
+    f.finish();
     f.report(cmd);
 }
 
@@ -500,5 +508,6 @@ void psi_threshold_net_test(const oc::CLP& cmd)
         cout << "verified: threshold t = " << t << " -> " << above << endl;
     }
 
+    f.finish();
     f.report(cmd);
 }
