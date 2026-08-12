@@ -1,3 +1,18 @@
+## This branch: homomorphic-rotation decode (design)
+
+This branch holds the design work for replacing the pre-rotated
+(sequenced) BGV decode with receiver-side homomorphic rotations: the
+receiver ships two Galois keys (row `+1` and column swap) and the sender
+rotates during the encrypted decode, so the shifted copies never travel.
+[docs/he-rotation-note.tex](docs/he-rotation-note.tex) Section 3 gives the
+dense two-row BGV construction and the rotation-schedule analysis —
+input-swap (`m/N + (w-1)` rotations) vs output-swap (`L/2 + (w-1)/2`,
+the default), cutting communication by ~38% against the pre-rotated
+layout's optimum at `eps = 0.2`. See [TODO.md](TODO.md) for the port plan
+and why it is parked (noise budget + parameter re-sweep).
+
+---
+
 ### Build
 
 The library can be cloned and built with networking support as follows.

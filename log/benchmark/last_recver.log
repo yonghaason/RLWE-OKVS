@@ -1,0 +1,22 @@
+ 1 - [1m[34mSSPMT_net_test                   [0mReceiver sends 261 Ctxts of OKVS Encoding
+Return noise budget: 3 - 3 bits
+verified: |X n Y| = 524288
+[recver]
+Label                                 Time (ms)  diff (ms)
+__________________________________
+Gmw::generateTriple begin                   6.0      6.025  **
+Gmw::generateTriple end                 11244.0  11237.947  **********
+Receiver::Setup (GMW triples)           11244.0      0.002  
+Receiver::OKVS Encoding                 11996.9    752.958  *******
+Receiver::Encryption & Send             12222.5    225.569  ******
+Receiver::Recv back and Serialize       22584.4  10361.892  **********
+Receiver::Decrypt                       22669.5     85.072  *****
+Receiver::Online GMW                    27083.0   4413.562  *********
+
+recv 115.964 MB, sent 83.454 MB
+[1m[32m  Passed[0m   27300ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m

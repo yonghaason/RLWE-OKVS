@@ -1,0 +1,25 @@
+ 1 - [1m[34mSSPMT_net_test                   [0mSender receives 261 Ctxts of OKVS Encoding, 50362210 Bytes
+Sender sends 252 decoded ctxts, 64159357 Bytes
+n = 1048576, intersection = 524288
+L (layers) = 252, H (slots) = 8192, L*H = 2064384
+[sender]
+Label                                           Time (ms)  diff (ms)
+__________________________________
+Sender::Setup (flooded masks)                       659.2    659.211  *******
+Gmw::generateTriple begin                           664.0      4.836  **
+Gmw::generateTriple end                           10629.4   9965.316  **********
+Sender::Setup (GMW triples)                       10629.4      0.001  
+Sender::Generate Bands                            10786.0    156.585  *****
+Sender::Sequencing                                10868.7     82.798  *****
+Sender::HE Encode                                 11578.0    709.219  *******
+Sender::Recv ctxts & Serialize                    16632.6   5054.592  *********
+Sender::Encrypted OKVS Decoding & Send Back       19706.5   3073.972  *********
+Sender::Online GMW                                27005.4   7298.834  **********
+
+recv 83.454 MB, sent 115.964 MB
+[1m[32m  Passed[0m   27743ms
+[1m[32m
+=============================================
+            All Passed (1)
+[1m[32m=============================================
+[0m

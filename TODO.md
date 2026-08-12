@@ -12,10 +12,9 @@ communication by roughly 38% against the pre-rotated layout's U-shaped
 optimum at `eps = 0.2`.
 
 **Where the design lives.** This branch (`he-rot-version`) carries the
-restored notes under `docs/`: `kkls-followup-note.tex` Section 3 has the
-dense two-row BGV decode, and Section 3.3 the input-swap
-(`m/N + (w-1)` rotations) vs output-swap (`L/2 + (w-1)/2`) schedule
-comparison; `encrypted-alignment-design.tex` is the earlier design note.
+restored note as `docs/he-rotation-note.tex`: Section 3 has the dense
+two-row BGV decode, and Section 3.3 the input-swap (`m/N + (w-1)`
+rotations) vs output-swap (`L/2 + (w-1)/2`) schedule comparison.
 The old rpmt-era implementation branch was discarded (2026-08-12) — the
 port will be a fresh implementation of the note's construction. The LOCAL
 branch `real-okvs-experiments` (095050c) still has `homdecode_bfv`, a
