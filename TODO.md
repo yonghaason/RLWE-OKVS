@@ -11,16 +11,16 @@ schedule needs `L/2 + (w-1)/2` receiver rotations under the two keys and cuts
 communication by roughly 38% against the pre-rotated layout's U-shaped
 optimum at `eps = 0.2`.
 
-**Where the code lives.**
-- LOCAL branch `he-rot-version` (bf54c0f, forked from 730f010):
-  `rlwe-okvs/rlwe-okvs/rpmt.{cpp,h}` — Galois key transfer in setup, the
-  rotation decode loop, `mHalfSlots`/`mNumHalfBatch` bookkeeping. Delta is
-  ~500 lines confined to the HE encode/decode stage.
-- LOCAL branch `real-okvs-experiments` (095050c): `homdecode_bfv`, a
-  standalone pre-rotated vs homomorphic-rotation compare test — useful for
-  verifying the port.
-- Neither branch is on GitHub anymore; push them before relying on this
-  plan from another machine.
+**Where the design lives.** This branch (`he-rot-version`) carries the
+restored notes under `docs/`: `kkls-followup-note.tex` Section 3 has the
+dense two-row BGV decode, and Section 3.3 the input-swap
+(`m/N + (w-1)` rotations) vs output-swap (`L/2 + (w-1)/2`) schedule
+comparison; `encrypted-alignment-design.tex` is the earlier design note.
+The old rpmt-era implementation branch was discarded (2026-08-12) — the
+port will be a fresh implementation of the note's construction. The LOCAL
+branch `real-okvs-experiments` (095050c) still has `homdecode_bfv`, a
+standalone pre-rotated vs homomorphic-rotation compare test, useful for
+verification.
 
 **Port plan.** Add a mode flag to `sspmtParams` (pre-rot | hom-rot) and
 branch only the setup (Galois keygen/serialize/receive) and the
