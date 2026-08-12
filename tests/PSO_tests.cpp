@@ -133,9 +133,9 @@ struct PsoFixture
 
 // Single-party counterpart of PsoFixture for the two-process *_net_test
 // variants (run one party per process so the link between them can be
-// shaped, e.g. by experiments/wan_netns.sh). Both processes regenerate the
-// same X, Y (and any payloads) from the fixed seed, so the receiver can
-// verify the protocol output locally without extra coordination.
+// shaped, e.g. by benchmark.sh). Both processes regenerate the same X, Y
+// (and any payloads) from the fixed seed, so the receiver can verify the
+// protocol output locally without extra coordination.
 //
 //   terminal 1:  ./run -u <idx> -role sender -ip 10.99.0.1:1212 -nn 20 -v
 //   terminal 2:  ./run -u <idx> -role recver -ip 10.99.0.1:1212 -nn 20 -v

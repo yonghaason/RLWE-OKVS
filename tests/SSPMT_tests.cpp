@@ -128,11 +128,11 @@ void sspmt_test(const oc::CLP& cmd)
 
 // Two-process variant of sspmt_test: each process runs ONE party and they
 // talk over a real TCP connection, so the link in between can be shaped
-// (e.g. the netns+veth WAN emulation in experiments/wan_netns.sh) without
-// touching the host's interfaces.
+// (e.g. the netns+veth WAN emulation in benchmark.sh) without touching the
+// host's interfaces.
 //
-//   terminal 1:  ./run -u 7 -role sender -ip 10.99.0.1:1212 -nn 20 -v
-//   terminal 2:  ./run -u 7 -role recver -ip 10.99.0.1:1212 -nn 20 -v
+//   terminal 1:  ./run -u 1 -role sender -ip 10.99.0.1:1212 -nn 20 -v
+//   terminal 2:  ./run -u 1 -role recver -ip 10.99.0.1:1212 -nn 20 -v
 //
 // The sender listens on -ip (its own address); the receiver connects to it.
 // Both processes derive X and Y from the same fixed seed, so no coordination
