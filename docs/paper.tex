@@ -225,9 +225,9 @@
 % Our starting point is the Oblivious Key-Value Store (OKVS) based RPMT framework, whose direct
 % adaptation to RLWE is obstructed by the batching structure of RLWE encryption. To address this, we introduce a batching-friendly variant of OKVS together with a homomorphic batched decoding procedure. 
 % We believe that this batching-friendly OKVS and its homomorphic decoding process may be of independent interest.
-Private set operations (PSOs) allow two parties to compute set-theoretic functionalities on private inputs without revealing information beyond the prescribed output. A common building block for PSOs is reverse private membership test (RPMT), but RPMT reveals the membership vector to the receiver and thus at least the intersection cardinality during execution. Secret-shared private membership test (ssPMT) instead outputs XOR shares of the membership vector, enabling subsequent OT or secure-computation modules to realize various PSOs without revealing individual membership bits or the intersection cardinality. However, existing efficient ssPMT constructions still incur substantial per-execution communication and computation costs.
+Private set operations (PSOs) allow two parties to compute set-theoretic functionalities on private inputs without revealing information beyond the prescribed output. A common building block for PSOs is reverse private membership test (RPMT), but RPMT reveals the membership vector to the receiver and thus at least the intersection cardinality during execution. Secret-shared private membership test (ssPMT) instead outputs XOR shares of the membership vector, so that subsequent OT or secure-computation modules can realize various PSOs without revealing individual membership bits or the intersection cardinality. However, existing efficient ssPMT constructions still incur substantial per-execution communication and computation costs.
 
-In this work, we propose a substantially faster ssPMT protocol by replacing the elliptic-curve core with RLWE-based one. 
+In this work, we propose a substantially faster ssPMT protocol by replacing the elliptic-curve core with an RLWE-based one. 
 Our starting point is the Oblivious Key-Value Store (OKVS) based RPMT framework, whose direct adaptation to RLWE is obstructed by the batching structure of RLWE encryption. To address this, we introduce a batching-friendly variant of OKVS together with a homomorphic batched decoding procedure. 
 We believe that this batching-friendly OKVS and its homomorphic decoding process may be of independent interest.
 \kwag{성능 수치 확정되면 성능 관련 문단 작성}
@@ -241,7 +241,7 @@ We believe that this batching-friendly OKVS and its homomorphic decoding process
 \section{Introduction}
 % Private set operations (PSOs) allow two parties to compute set-theoretic functionalities on their private inputs without revealing additional information beyond the prescribed output. 
 % 이러한 PSO 프로토콜의 발전에 큰 영향을 미친 것은 RPMT framework~\cite{KRTW19}로, 집합 \(X\)를 가진 receiver는 sender의 각 원소 \(y\)에 대해 membership bit \(\vec{1}[y\in X]\)를 얻고, sender는 아무것도 얻는 것이 없는 구조이다. RPMT construction은 membership vector를 OT 또는 secure computation 모듈과 결합하여 다양한 PSO 프로토콜로 설계 가능한 장점이 있으며 꾸준히 발전되었다~\cite{ZCL+23,CZZ+24}.
-Private set operations (PSOs) allow two parties to compute set-theoretic functionalities on their private inputs without revealing additional information beyond the prescribed output. One framework that has significantly shaped the development of PSO protocols is the reverse private set membership test (RPMT) framework~\cite{KRTW19}, in which a receiver holding a set \(X\) obtains the membership bit \(\vec{1}(y\in X)\) for each element \(y\) held by the sender, while the sender obtains nothing. RPMT constructions have been continuously developed because the resulting membership vector can be combined with OT or secure-computation modules to construct various PSO protocols~\cite{ZCL+23,CZZ+24}.
+Private set operations (PSOs) allow two parties to compute set-theoretic functionalities on their private inputs without revealing additional information beyond the prescribed output. One framework that has shaped much of the development of PSO protocols is the reverse private set membership test (RPMT) framework~\cite{KRTW19}, in which a receiver holding a set \(X\) obtains the membership bit \(\vec{1}(y\in X)\) for each element \(y\) held by the sender, while the sender obtains nothing. RPMT constructions have been continuously developed because the resulting membership vector can be combined with OT or secure-computation modules to construct various PSO protocols~\cite{ZCL+23,CZZ+24}.
 
 % 그러나 RPMT 기반 PSO 프로토콜에서는 PSO가 종료되기 전에 receiver가 중간 membership indication vector를 획득한다. 이에 따라 receiver는 정해진 output을 받기 전에 최소한 intersection cardinality를 알 수 있으며, 이러한 중간 정보 노출은 \cite{JSZG24}에서 \emph{during-execution leakage} (DEL)로 지적되었다.\footnote{\cite{PGT26}은 semi-honest setting에서 enhanced PSU와 standard PSU가 동등하다고 주장하며 DEL의 의미에 의문을 제기하였으나, \cite[Appendix~B]{JSZG24}는 해당 동등성 주장에 재반박하였다.} .
 % PSU들의 경우 이러한 DEL 공격을 방어하기 위한 enhanced PSU의 concept 및 protocol들이 제안되고 있으나 ~\cite{JSZG24,TBZ+25}, DEL-leaky한 방향에 비해 performance가 꽤 안좋은 편임. 최근 DEL을 허용하는 상황에서는 상당히 빠른 work~\cite{PG26}도 제안되어 이러한 간극이 더 큰 상황임.
@@ -361,7 +361,7 @@ However, when encryption is performed with RLWE-PKE, $\vec{p}$ is encrypted in a
 
 
 \paragrap{OKVS decoding as a matrix--vector product}
-Therefore, the main technical problem is to compute the encrypted inner product~\eqref{eq:decodeinnerprod} where $\vec{p}$ is encrypted in a batched manner. For this, note that the sender after all needs to decode the OKVS \emph{for all} $y \in Y$. In this view, OKVS decoding actually corresponds to a matrix--vector product $\mat{M} \cdot \vec{p}$, where the row of $\mat{M}$ corresponding to $y$ is $\mathsf{row}(y)$ and $\vec{p}$ is the OKVS encoding vector. At this point, also note that we exclusively consider the random-band (RB) matrix-based OKVS construction of~\cite{BPSY23}, in which each $\mathsf{row}(y)$ consists of a random band---namely, a short sequence of entries of fixed length---starting at a random position.
+Therefore, the main technical problem is to compute the encrypted inner product~\eqref{eq:decodeinnerprod} where $\vec{p}$ is encrypted in a batched manner. For this, note that the sender after all needs to decode the OKVS \emph{for all} $y \in Y$. In this view, OKVS decoding actually corresponds to a matrix--vector product $\mat{M} \cdot \vec{p}$, where the row of $\mat{M}$ corresponding to $y$ is $\mathsf{row}(y)$ and $\vec{p}$ is the OKVS encoding vector. At this point, also note that we exclusively consider the random-band (RB) matrix-based OKVS construction of~\cite{BPSY23}, in which each $\mathsf{row}(y)$ consists of a random band (a short sequence of entries of fixed length) starting at a random position.
 
 Then, considering that RLWE batching and slot-wise operations are particularly well suited for diagonal matrix--vector product, it is natural to realign the rows of $\mat{M}$ so that, with respect to their band starting positions, the matrix becomes (almost) diagonal; we can then formulate homomorphic OKVS decoding to a matrix--vector product where the matrix consists of consecutive diagonals. 
 %삭제 3
@@ -831,7 +831,7 @@ As a result, every $N \times m$ submatrix of the diagonalized RSB matrix can hav
 %%%%%%%%%%% Subsec 3.2%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection{Sequencing} \label{subsec:sequencing} 
 Although we defined the RSB matrix family in a form well suited for diagonal matrix--vector product, this approach is effective only when the matrix can be fully diagonalized. However, because $\mathsf{H}_1(k_i)$ is random, collisions among row starting positions are inevitable. %Even a single collision prevents the RSB matrix $\mat{\hat{M}}$ from being perfectly diagonalized, which in turn undermines our diagonal matrix--vector product strategy. 
-To address this, we present a technique---which we call \emph{sequencing}---as described below.
+To address this, we present a technique, which we call \emph{sequencing}, as described below.
 
 \paragrap{Naive sequencing into $m \times m$ matrices} 
 A naive remedy is to distribute rows with colliding starting positions across multiple diagonalized $m\times m$ matrices like \Cref{fig:sequencing_overview_b}. 
@@ -857,7 +857,7 @@ However, naively grouping rows solely according to their starting positions modu
 While the $n$-balls-into-$m$-bins sequencing always yields each $N\times m$ submatrix with exactly $w$ nonzero diagonals, the $n$-balls-into-$N$-bins sequencing scatters row starting points across the entire matrix; it potentially increases the number of nonzero diagonals up to $m/N + w-1$ for every sequenced matrix. 
 
 The natural question is therefore how to reallocate the $n$ rows (with starting points $a_i := {\sf H}_1(k_i)$) into a collection of $N\times m$ matrices, \emph{while keeping the starting points clustered}. 
-Regarding, we come up with a greedy sequencing~\Cref{alg:sequencing}. Given a span limit parameter $\zeta$, it inserts each row in ascending index manner as follows: If there is an existing $N\times m$ layer matrix as long as its occupied block span remains at most $\zeta$ after insertion, then put the row in it (line 6 in \Cref{alg:sequencing}); otherwise, create a new $N\times m$ layer. 
+To this end, we devise a greedy sequencing algorithm (\Cref{alg:sequencing}). Given a span limit parameter $\zeta$, it inserts the rows in nondecreasing order of starting position: each row is placed into an existing $N\times m$ layer whenever the layer's occupied block span stays at most $\zeta$ after the insertion (line 6 in \Cref{alg:sequencing}); otherwise, a new $N\times m$ layer is created. 
 It can be easily checked that each resulting $N \times m$ matrix of \Cref{alg:sequencing} has at most $w+\zeta$ cyclic diagonals. One can find a toy graphical example of this process in \Cref{sec:example}.
 
 
@@ -945,8 +945,8 @@ $\{c_\alpha\}_{\alpha=1}^{b+w-1}$ of the form $c_{jb+i}=\mathsf{RLWE.Enc}(\rho_j
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \paragrap{Reason for pre-rotation, rather than HE-rotation}
-Some HE familiar readers may consider letting the sender generate the additional $w-1$ ciphertexts via homomorphic rotation, rather than sending pre-rotated $w-1$ ciphertexts; this will save the communication, with some additional computational cost for homomorphic rotations.
-However, our deployed BGV HE~\cite{BGV14} scheme do not directly support a full cyclic rotation over all \(N\) slots. Rather, the packed slots are viewed as a \(2 \times (N/2)\) array, in the sense that native slot manipulations are row/column-wise rotations. This makes the vectorized rotation a bit inefficient, and currently we are not aware of the way to efficiently utilize such structure.
+Readers familiar with HE may consider letting the sender generate the additional $w-1$ ciphertexts by homomorphic rotation, rather than receiving the pre-rotated ciphertexts; this would save communication at some additional computational cost.
+However, the BGV scheme~\cite{BGV14} we deploy does not directly support a full cyclic rotation over all \(N\) slots. Rather, the packed slots are viewed as a \(2 \times (N/2)\) array, in the sense that native slot manipulations are row/column-wise rotations. This makes the vectorized rotation somewhat inefficient, and we are currently not aware of a way to utilize this structure efficiently.
 
 
 \paragrap{Optimization with full-field random bands}
@@ -954,7 +954,7 @@ A key factor of the high performance of RB-OKVS~\cite{BPSY23} was that its band 
 
 Upon this observation, we sample band elements from the full field $\mathbb{Z}_p$, and this even provides the following benefit. In \cite{BPSY23}, the band-width $w$ (and expansion rate $\varepsilon$) is chosen so the induced RB matrix is full rank with probability at least $1-2^{-\lambda}$.
 In this respect, we can expect that the full field bands would increase the entropy of matrix relative to binary bands, and hence make full rank more likely.
-In other words, we can expect that the target success probability $1 - 2^{-\lambda}$ can be achieved with a smaller band width $w$ for the full field band.
+Consequently, the target success probability $1 - 2^{-\lambda}$ can be expected to hold with a smaller band width $w$ for the full-field band.
 
 We indeed observe that, for various $n$ and expansion ratio $\varepsilon$, the same target probability can be attained with smaller band width; the detailed experimental results are presented in \Cref{sec:OKVS experiment}. Since both computational and communication cost of our homomorphic decoding procedure (\Cref{alg:RSBDecoding}) depends on the band width $w$, this directly improves the performance.
 
@@ -1211,7 +1211,7 @@ in $n$.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%Sec 6%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \section{Experimental Results}\label{sec:performance}
-In this section, we report experimental results for our ssPMT protocol, which serves as the main building block for several private set operations, and for our PSU protocol. We compare their performance with that of state-of-the-art protocols. {\blue{공간이 부족해서 비교하지는 않지만 우리 구현에는 PSI-cardinality, Threshold 등 PSO 프로토콜도 구현되어있다.(언급할까요?)}} All parameters are selected to provide $\lambda=40$ bits of statistical security and $\kappa=128$ bits of computational security, as commonly adopted in the literature. 
+In this section, we report experimental results for our ssPMT protocol, which is the main building block for several private set operations, and for our PSU protocol. We compare their performance with that of state-of-the-art protocols. {\blue{공간이 부족해서 비교하지는 않지만 우리 구현에는 PSI-cardinality, Threshold 등 PSO 프로토콜도 구현되어있다.(언급할까요?)}} All parameters are selected to provide $\lambda=40$ bits of statistical security and $\kappa=128$ bits of computational security, as commonly adopted in the literature. 
 
 \paragrap{Experiment environments}
 % {\color{blue}For a fair comparison between our RSB-PSU and existing protocols, we deployed and evaluated their open-source implementations on our local server. }\footnote{\cite{JSZG24}:\texttt{https://github.com/yanxue820/SecurePSU},
@@ -1280,7 +1280,7 @@ on our machine. We consider four network environments: 10Gbps with 0.1 ms latenc
 
 %%%%%%%%%%%%%%%%%%%%%%%%PSO%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \paragrap{Comparison of PSO base}
-\Cref{tab:sspmt-comparison} compares the RPMT of \cite{CZZ+24} with the ssPMT protocols of \cite{WCS+26} and ours, which serve as core building blocks for PSO. \cite{CZZ+24} performs costly X25519-based cwPRF evaluations for every input item, whereas our RLWE construction amortizes ciphertext-level operations over \(N\) packed slots. Our protocol is therefore faster in every LAN experiment, with the advantage reaching \(3.65\times\) at \(n=2^{22}\). \cite{CZZ+24}, however, requires substantially less communication and is thus generally faster in bandwidth-constrained WAN settings, particularly for smaller sets and at \(10\) Mbps.  More importantly, \cite{CZZ+24} does not prevent DEL, whereas our ssPMT reveals only secret shares of the membership bits.  
+\Cref{tab:sspmt-comparison} compares the RPMT of \cite{CZZ+24} with the ssPMT protocols of \cite{WCS+26} and ours, which are the core building blocks for PSO. \cite{CZZ+24} performs costly X25519-based cwPRF evaluations for every input item, whereas our RLWE construction amortizes ciphertext-level operations over \(N\) packed slots. Our protocol is therefore faster in every LAN experiment, with the advantage reaching \(3.65\times\) at \(n=2^{22}\). \cite{CZZ+24}, however, requires substantially less communication and is thus generally faster in bandwidth-constrained WAN settings, particularly for smaller sets and at \(10\) Mbps.  More importantly, \cite{CZZ+24} does not prevent DEL, whereas our ssPMT reveals only secret shares of the membership bits.  
 
 \cite{WCS+26} also prevents DEL, but its ssPMT construction relies on communication-intensive secure equality testing and permutation-correlation. These components lead to substantially larger end-to-end communication and computation. Across the reported set sizes, \cite{WCS+26} requires \(6.66\)--\(23.17\times\) the communication of ours, causing its performance to degrade sharply as bandwidth decreases. Consequently, our total runtime is lower in every reported setting, achieving up to a \(23.11\times\) speedup at \(n=2^{22}\) and \(10\) Mbps (\(13077.83\) versus \(565.84\) seconds). For example, at \(n=2^{20}\) and \(100\) Mbps, our protocol achieves a \(14.42\times\) speedup (\(393.04\) versus \(27.26\) seconds).
 
@@ -2203,7 +2203,7 @@ This online-latency advantage comes with \(3607.72\) MB of single-use offline co
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Conclusion}
 We presented an efficient ssPMT protocol based on RLWE-batched homomorphic OKVS decoding. Our main technical contribution is RSB-OKVS, obtained through a structure-preserving column permutation of random-band OKVS, together with a span-constrained sequencing algorithm that arranges colliding query rows into SIMD-friendly layers. By padding the input-dependent number of layers to a public budget $L'$ and applying masking, rerandomization, and noise flooding before secret-shared equality testing, our protocol produces a fixed-length collection of XOR-shared membership indicators in a protocol-defined layout. These shares can be directly used to construct several private set operations, including PSI-Cardinality, PSI-Threshold, PSI-Sum, and PSU.
-Furthermore, regarding the computation of the inner product over the intersection—where both parties possess associated payloads—several dedicated solutions exist~\cite{PSTY19,LPR+21}. 
+Furthermore, for the setting where both parties hold associated payloads and compute an inner product over the intersection, several dedicated solutions exist~\cite{PSTY19,LPR+21}. 
 % Extending our approach to efficiently support this functionality remains an open problem.
 
 \newpage
