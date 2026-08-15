@@ -46,3 +46,11 @@ __pycache__/*
 thirdparty/install/*
 .codex
 CLAUDE.md
+
+# LaTeX build artifacts
+docs/*.aux
+docs/*.bbl
+docs/*.blg
+docs/*.log
+docs/*.out
+docs/*.pdf
