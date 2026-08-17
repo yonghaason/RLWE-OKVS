@@ -54,3 +54,7 @@ docs/*.blg
 docs/*.log
 docs/*.out
 docs/*.pdf
+docs/*.fdb_latexmk
+docs/*.fls
+docs/*.synctex.gz
+log/benchmark/

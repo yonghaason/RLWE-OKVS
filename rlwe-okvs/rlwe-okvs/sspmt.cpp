@@ -227,17 +227,16 @@ u32 sspmtParams::resolveSpanBlocks(u64 n) const {
   // is measured against. Past W = b every window already covers every block,
   // hence the search stops there.
   const double floor = (double)caps.back();
-  std::vector<double> obj(b);
+  // Running-time argmin, restricted to W >= min(lambda, b) so that the
+  // asymptotic analysis covers the deployed schedule.
+  const uint32_t Wlo = std::min<uint32_t>(layerBudgetLambda, b);
+  uint32_t span = Wlo;
   double best = std::numeric_limits<double>::max();
-  for (uint32_t W = 1; W <= b; ++W) {
-    obj[W - 1] = (double)budgetForSpan(caps, b, W) / floor + spanCostRatio * W;
-    best = std::min(best, obj[W - 1]);
-  }
-  // Communication keeps falling after the time optimum, so take the widest
-  // span still on the plateau.
-  uint32_t span = 1;
-  for (uint32_t W = 1; W <= b; ++W) {
-    if (obj[W - 1] <= best * (1.0 + spanTimeSlack)) {
+  for (uint32_t W = Wlo; W <= b; ++W) {
+    const double obj =
+        (double)budgetForSpan(caps, b, W) / floor + spanCostRatio * W;
+    if (obj < best) {
+      best = obj;
       span = W;
     }
   }

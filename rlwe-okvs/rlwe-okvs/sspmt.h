@@ -41,7 +41,7 @@ namespace rlweOkvs
         // log2(e) = returnBits - log2(t) - budget - 1 (8, 10, 12, 12 bits for
         // the four sizes); floodBits is that plus 40, which leaves the budget
         // at 3-7 bits after flooding.
-        u32 floodBits = 52;
+        u32 floodBits = 54;
 
         // The number of layers to transmit for a sender set of size n: the
         // explicit layerBudget when set, otherwise a count that the optimal
@@ -80,19 +80,15 @@ namespace rlweOkvs
         // A and by the budget floor D(b)+1, and using L_real <= budget ~ floor
         // once the span is past the knee, leaves the scale-free
         //     minimize  resolveLayerBudget(W) / floor  +  spanCostRatio * W.
-        // Communication has no diagonal term at all -- it is A's half of the
-        // cost and nothing else -- so it falls monotonically in W; the span is
-        // therefore pushed to the far edge of the objective's spanTimeSlack
-        // plateau rather than to its minimum.
+        // The search is restricted to W >= min(lambda, b), the hypothesis of
+        // the layer-budget lemma, so the asymptotic analysis covers whatever
+        // span comes out; within that range the plain argmin is taken.
         u32 resolveSpanBlocks(u64 n) const;
         // One decode diagonal over one layer, in units of that layer's GMW
         // instance plus returned ciphertext. Measured at n = 2^20: a layer
         // costs 34.6 ms (least-squares over the budget across four spans) and
         // a diagonal 61.5 us (the decode's slope in W, divided by L_real).
         double spanCostRatio = 1.8e-3;
-        // How far past the time optimum to ride the plateau for the smaller
-        // transcript. One percent of the layer-cost term.
-        double spanTimeSlack = 0.01;
         // heCoeffModulus is {fresh-level primes..., special}. The special
         // prime is consumed only by key switching, which this protocol never
         // performs (no relinearization, no rotation), so its size is free and
@@ -110,28 +106,28 @@ namespace rlweOkvs
         void initialize(int n) {
             switch(n){
                 case (1ull << 16):
-                    floodBits = 48;
+                    floodBits = 50;
                     heCoeffModulus = {50, 58, 60, 50};
                     hePlainModulusBits = 56;
                     bandWidth = 29;
                     bandExpansion = 2.1;
                     break;
                 case (1ull << 18):
-                    floodBits = 50;
+                    floodBits = 52;
                     heCoeffModulus = {54, 58, 60, 46};
                     hePlainModulusBits = 58;
                     bandWidth = 43;
                     bandExpansion = 1.7;
                     break;
                 case (1ull << 20):
-                    floodBits = 52;
+                    floodBits = 54;
                     heCoeffModulus = {58, 58, 60, 42};
                     hePlainModulusBits = 60;
                     bandWidth = 44;
                     bandExpansion = 1.7;
                     break;
                 case (1ull << 22):
-                    floodBits = 52;
+                    floodBits = 54;
                     heCoeffModulus = {60, 60, 60, 38};
                     hePlainModulusBits = 60;
                     bandWidth = 46;
