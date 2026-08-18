@@ -242,7 +242,8 @@ void SspmtSender::buildFloodedMasks() {
     }
     mBatchEncoder->encode(raw, ptxt);
 
-    mEncryptor->encrypt_zero(mReturnParms, mFloodedMasks[lay]);
+    mEncryptor->encrypt_zero(mFloodedMasks[lay]);
+    mEvaluator->mod_switch_to_next_inplace(mFloodedMasks[lay]);
     mEvaluator->add_plain_inplace(mFloodedMasks[lay], ptxt);
     addFloodingNoise(mFloodedMasks[lay]);
   }
