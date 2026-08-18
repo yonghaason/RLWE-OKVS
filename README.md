@@ -4,13 +4,29 @@ An implementation of the ssPMT protocol from RLWE-batched homomorphic OKVS
 decoding, together with the private set operation (PSO) protocols derived
 from it: PSI-Cardinality, PSI-Threshold, PSI-Sum, and PSU.
 
-### Build
+### Getting the source
 
-The library can be cloned and built with networking support as follows.
+This anonymized repository does not support `git clone`. Instead, download
+the repository archive from the landing page and extract it. The
+`thirdparty/` dependencies are git submodules and are not included in the
+archive; fetch them at the pinned versions:
 
 ```bash
-git clone https://github.com/yonghaason/RLWE-OKVS.git --recursive
-cd RLWE-OKVS/thirdparty/SEAL
+cd thirdparty
+git clone https://github.com/microsoft/SEAL.git SEAL
+git -C SEAL checkout v4.4.3
+git clone https://github.com/osu-crypto/libOTe.git libOTe
+git -C libOTe checkout d5c01fcb6afdec6a01f7e7a1433ed8d86868c85a
+git -C libOTe submodule update --init --recursive
+git clone https://github.com/Cyan4973/xxHash.git xxHash
+git -C xxHash checkout 82cead715cbfddd9e6093db8df95155077ce6e64
+cd ..
+```
+
+### Build
+
+```bash
+cd thirdparty/SEAL
 cmake -S . -B build \
  -DSEAL_USE_INTEL_HEXL=ON \
  -DCMAKE_INSTALL_PREFIX=../install/SEAL
