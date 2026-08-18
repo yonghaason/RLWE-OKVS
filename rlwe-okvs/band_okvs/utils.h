@@ -16,4 +16,4 @@ void PrintElapsedTime();
 
 }
 
-#endif //BANDOKVS_UTILS_H_
+#endif

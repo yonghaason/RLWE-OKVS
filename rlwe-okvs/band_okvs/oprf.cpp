@@ -13,7 +13,7 @@ using namespace std;
 using namespace seal;
 using namespace oc;
 
-namespace rlweOkvs 
+namespace rlweOkvs
 {
     Proto OprfSender::run(
         const std::vector<oc::block> &Y,
@@ -39,10 +39,7 @@ namespace rlweOkvs
 
         band_okvs::BandOkvs okvs;
         auto band_length = 196;
-        // Decode instance: the number of equations is OUR evaluation count mN
-        // (mNreceiver only determines the OKVS length m). The two coincide in
-        // the balanced OPRF test, but differ when the sender evaluates at a
-        // different number of points than the receiver encoded (e.g. CPSI).
+
         okvs.Init(mN, m, band_length, oc::ZeroBlock);
 
         vector<block> kk(m);
@@ -55,12 +52,11 @@ namespace rlweOkvs
 
         vector<block> h(mN);
         oc::mAesFixedKey.hashBlocks(Y, h);
-        
+
         for (size_t i = 0; i < mN; i++) {
             FY[i] = FY[i] ^ Delta.gf128Mul(h[i]);
         }
 
-        // Random Oracle
         oc::mAesFixedKey.hashBlocks(FY, FY);
     }
 
@@ -69,7 +65,7 @@ namespace rlweOkvs
         std::vector<oc::block> &FX,
         Socket &chl)
     {
-        band_okvs::BandOkvs okvs;        
+        band_okvs::BandOkvs okvs;
         auto m = static_cast<size_t>((1.1 * mN));
         auto band_length = 196;
         okvs.Init(mN, m, band_length, oc::ZeroBlock);
@@ -78,7 +74,7 @@ namespace rlweOkvs
         vector<block> val(mN);
         oc::mAesFixedKey.hashBlocks(X, val);
 
-        okvs.Encode(X.data(), val.data(), pp.data());        
+        okvs.Encode(X.data(), val.data(), pp.data());
 
         SilentVoleReceiver<block, block, oc::CoeffCtxGF128> voleReceiver;
         co_await voleReceiver.silentReceiveInplace(m, mPrng, chl);
@@ -90,9 +86,8 @@ namespace rlweOkvs
         co_await chl.send(move(pp));
 
         FX.resize(mN);
-        okvs.Decode(X.data(), voleReceiver.mA.data(), FX.data());   
+        okvs.Decode(X.data(), voleReceiver.mA.data(), FX.data());
 
-        // Random Oracle
         oc::mAesFixedKey.hashBlocks(FX, FX);
 
     }

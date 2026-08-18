@@ -327,13 +327,13 @@ constexpr inline uint<Size> operator>>(uint<Size> lhs, int amount);
 
 template<>
 constexpr inline uint<1> operator>>(uint<1> lhs, int amount) {
-  // Only for amount < 128
+
   return MakeUint(Uint(lhs, 0) >> amount);
 }
 
 template<>
 constexpr inline uint<2> operator>>(uint<2> lhs, int amount) {
-  // Only for amount < 128
+
   return MakeUint(
       Uint(lhs, 0) >> amount | (Uint(lhs, 1) << (128 - amount)),
       Uint(lhs, 1) >> amount);
@@ -341,7 +341,7 @@ constexpr inline uint<2> operator>>(uint<2> lhs, int amount) {
 
 template<>
 constexpr inline uint<3> operator>>(uint<3> lhs, int amount) {
-  // Only for amount < 128
+
   return MakeUint(
       Uint(lhs, 0) >> amount | (Uint(lhs, 1) << (128 - amount)),
       Uint(lhs, 1) >> amount | (Uint(lhs, 2) << (128 - amount)),
@@ -350,7 +350,7 @@ constexpr inline uint<3> operator>>(uint<3> lhs, int amount) {
 
 template<>
 constexpr inline uint<4> operator>>(uint<4> lhs, int amount) {
-  // Only for amount < 128
+
   return MakeUint(
       Uint(lhs, 0) >> amount | (Uint(lhs, 1) << (128 - amount)),
       Uint(lhs, 1) >> amount | (Uint(lhs, 2) << (128 - amount)),
@@ -360,7 +360,7 @@ constexpr inline uint<4> operator>>(uint<4> lhs, int amount) {
 
 template<>
 constexpr inline uint<5> operator>>(uint<5> lhs, int amount) {
-  // Only for amount < 128
+
   return MakeUint(
       Uint(lhs, 0) >> amount | (Uint(lhs, 1) << (128 - amount)),
       Uint(lhs, 1) >> amount | (Uint(lhs, 2) << (128 - amount)),
@@ -371,7 +371,7 @@ constexpr inline uint<5> operator>>(uint<5> lhs, int amount) {
 
 template<>
 constexpr inline uint<6> operator>>(uint<6> lhs, int amount) {
-  // Only for amount < 128
+
   return MakeUint(
       Uint(lhs, 0) >> amount | (Uint(lhs, 1) << (128 - amount)),
       Uint(lhs, 1) >> amount | (Uint(lhs, 2) << (128 - amount)),
@@ -419,4 +419,4 @@ constexpr inline bool operator!=(uint<Size> lhs, int rhs) {
 
 }
 
-#endif //BANDOKVS_UINT_H_
+#endif

@@ -1,10 +1,5 @@
+// Adapted from the GMW implementation in https://github.com/ladnir/volepsi.
 #pragma once
-// © 2022 Visa.
-// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-// 
-// The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-// 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include "Defines.h"
 #include "Circuit.h"
@@ -13,7 +8,6 @@
 #include <cryptoTools/Network/Channel.h>
 #include <cryptoTools/Common/Matrix.h>
 
-//for debugging
 using namespace std;
 
 namespace volePSI
@@ -37,35 +31,31 @@ namespace volePSI
             Matrix<block> mWords;
         };
 
-
         Debug mO;
 
-        // allow the circuit to be reordered into levels
-        // based on their AND depth.
         BetaCircuit::LevelizeType mLevelize = BetaCircuit::LevelizeType::Reorder;
 
         u64 mN = 0, mNumOts = 0, mIdx, mNumThreads, mBatchSize;
         OtExtType mOtExtType;
-        //u64 mBitCount;
+
         Matrix<block> mWords;
         u64 mRoundIdx = 0, mNumRounds;
         BetaCircuit mCir;
         span<oc::BetaGate> mGates;
 
         oc::PRNG mPrng, mPhiPrng;
-                
+
         span<block> mA, mB, mC, mC2, mD;
 
         u64 mDebugPrintIdx = -1;
         BetaCircuit::PrintIter mPrint;
-
 
         void init(
             u64 n,
             BetaCircuit& cir,
             u64 numThreads,
             u64 batchSize,
-            u64 pIdx, 
+            u64 pIdx,
             block seed);
 
         void setTriples(span<block> a, span<block> b, span<block> c, span<block> d)
@@ -99,7 +89,6 @@ namespace volePSI
             implGetOutput(i, ii, sizeof(T));
         }
 
-
         void implSetInput(u64 i, oc::MatrixView<u8> input, u64 alignment);
         void implGetOutput(u64 i, oc::MatrixView<u8> out, u64 alignment);
 
@@ -116,14 +105,11 @@ namespace volePSI
 
         Proto roundFunction(coproto::Socket& chl);
 
-
         Proto multSendP1(span<block> x, coproto::Socket& chl, oc::GateType gt);
         Proto multSendP2(span<block> x, coproto::Socket& chl, oc::GateType gt);
 
-
         Proto multRecvP1(span<block> x, span<block> z, coproto::Socket& chl, oc::GateType gt);
         Proto multRecvP2(span<block> x,  span<block> z, coproto::Socket& chl);
-
 
         Proto multSend(span<block> x, span<block> y, coproto::Socket& chl, oc::GateType gt)
         {
@@ -134,7 +120,6 @@ namespace volePSI
         }
         Proto multSendP1(span<block> x, span<block> y, coproto::Socket& chl, oc::GateType gt);
         Proto multSendP2(span<block> x, span<block> y, coproto::Socket& chl);
-
 
         Proto multRecv(span<block> x, span<block> y, span<block> z, coproto::Socket& chl, oc::GateType gt)
         {

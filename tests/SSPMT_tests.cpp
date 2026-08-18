@@ -22,21 +22,12 @@ using namespace std;
 using namespace oc;
 using namespace rlweOkvs;
 
-// End-to-end correctness of the full-layout RLWE-OKVS ss-PMT.
-//
-// Roles: the sender holds Y and drives the sequenced homomorphic decode; the
-// receiver holds X and encodes the indicator OKVS. The output is a per-slot
-// XOR share over the WHOLE L x H layout (no occupancy is revealed). A slot
-// reconstructs to 1 iff the Y-item sitting there is in X, and empty slots
-// reconstruct to 0, so the reconstructed bits sum to exactly |X n Y| -- which
-// is the ground truth we check, without needing the sender's internal layout.
 void sspmt_test(const oc::CLP& cmd)
 {
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
     u64 nt = cmd.getOr("nt", 1);
     u64 inter = cmd.getOr("inter", n / 2);
 
-    // The HE parameter table only has entries for these sizes.
     u64 paramN = (n == (1ull << 16) || n == (1ull << 18) ||
                   n == (1ull << 20) || n == (1ull << 22))
                      ? n
@@ -49,7 +40,6 @@ void sspmt_test(const oc::CLP& cmd)
 
     PRNG prng(block(9871234, 1276353));
 
-    // X, Y distinct random, agreeing on exactly `inter` items.
     vector<block> X(n), Y(n);
     prng.get(X.data(), X.size());
     prng.get(Y.data(), Y.size());
@@ -63,7 +53,7 @@ void sspmt_test(const oc::CLP& cmd)
     pool1.create_threads(nt);
 
     auto socket = coproto::AsioSocket::makePair();
-    // auto socket = coproto::LocalAsyncSocket::makePair();
+
     socket[0].setExecutor(pool0);
     socket[1].setExecutor(pool1);
 
@@ -89,7 +79,6 @@ void sspmt_test(const oc::CLP& cmd)
     if (ss.size() != rs.size())
         throw RTE_LOC;
 
-    // Reconstruct: every slot's bit is the XOR of the two shares.
     oc::BitVector flags = ss;
     flags ^= rs;
 
@@ -107,7 +96,7 @@ void sspmt_test(const oc::CLP& cmd)
     if (cmd.isSet("v"))
     {
         u64 L = sender.getNumLayers();
-        u64 layout = sender.getLayoutSize();  // L * H
+        u64 layout = sender.getLayoutSize();
         std::cout << "n = " << n << ", intersection = " << inter << std::endl;
         std::cout << "L (layers) = " << L
                   << ", H (slots) = " << params.heNumSlots
@@ -126,19 +115,6 @@ void sspmt_test(const oc::CLP& cmd)
     }
 }
 
-// Two-process variant of sspmt_test: each process runs ONE party and they
-// talk over a real TCP connection, so the link in between can be shaped
-// (e.g. the netns+veth WAN emulation in benchmark.sh) without touching the
-// host's interfaces.
-//
-//   terminal 1:  ./run -u 1 -role sender -ip 10.99.0.1:1212 -nn 20 -v
-//   terminal 2:  ./run -u 1 -role recver -ip 10.99.0.1:1212 -nn 20 -v
-//
-// The sender listens on -ip (its own address); the receiver connects to it.
-// Both processes derive X and Y from the same fixed seed, so no coordination
-// is needed. After the protocol (and outside the timed region) the sender
-// ships its share vector over for the same |X n Y| ground-truth check as
-// sspmt_test.
 void sspmt_net_test(const oc::CLP& cmd)
 {
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
@@ -164,8 +140,6 @@ void sspmt_net_test(const oc::CLP& cmd)
     params.bandExpansion = cmd.getOr("m_r", params.bandExpansion);
     params.span_blocks = cmd.getOr("seq_span", params.span_blocks);
 
-    // Same fixed seed as sspmt_test: both processes regenerate identical
-    // X, Y without communicating.
     PRNG prng(block(9871234, 1276353));
     vector<block> X(n), Y(n);
     prng.get(X.data(), X.size());
@@ -176,7 +150,6 @@ void sspmt_net_test(const oc::CLP& cmd)
     auto e = pool.make_work();
     pool.create_threads(nt);
 
-    // The sender doubles as the TCP server.
     auto sock = coproto::asioConnect(ip, isSender);
     sock.setExecutor(pool);
 
@@ -187,11 +160,10 @@ void sspmt_net_test(const oc::CLP& cmd)
     {
         SspmtSender sender;
         sender.setTimer(timer);
-        sender.init(n, n, params, block(555, 1) /*party seed*/);
+        sender.init(n, n, params, block(555, 1) );
         auto p = sender.run(Y, share, sock);
         macoro::sync_wait(std::move(p) | macoro::start_on(pool));
 
-        // Untimed: hand the receiver our share so it can verify.
         std::vector<u8> buf(share.sizeBytes());
         memcpy(buf.data(), share.data(), buf.size());
         macoro::sync_wait(sock.send(coproto::copy(buf)));
@@ -210,7 +182,7 @@ void sspmt_net_test(const oc::CLP& cmd)
     {
         SspmtReceiver recver;
         recver.setTimer(timer);
-        recver.init(n, n, params, block(555, 2) /*party seed*/);
+        recver.init(n, n, params, block(555, 2) );
         auto p = recver.run(X, share, sock);
         macoro::sync_wait(std::move(p) | macoro::start_on(pool));
 
@@ -232,8 +204,6 @@ void sspmt_net_test(const oc::CLP& cmd)
         std::cout << "verified: |X n Y| = " << matches << std::endl;
     }
 
-    // coproto aborts if the socket is destroyed with operations still in
-    // flight; drain it before it goes out of scope.
     macoro::sync_wait(sock.flush());
 
     if (cmd.isSet("v"))

@@ -9,9 +9,9 @@ namespace rlweOkvs
 {
 
     void mat_vec_mult_band_flat(
-        const std::vector<uint64_t> &bands_flat, 
-        const std::vector<uint32_t> &s, 
-        const std::vector<uint64_t> &x, 
+        const std::vector<uint64_t> &bands_flat,
+        const std::vector<uint32_t> &s,
+        const std::vector<uint64_t> &x,
         const seal::Modulus &modulus,
         std::vector<uint64_t> &result);
 
@@ -28,11 +28,11 @@ namespace rlweOkvs
         seal::Modulus mModulus;
         uint32_t mN;
         uint32_t mM;
-        uint32_t mW; // random-band weight
+        uint32_t mW;
         uint32_t mSpacing;
 
         public:
-            void init(uint32_t n, uint32_t m, uint32_t w, seal::Modulus modulus) 
+            void init(uint32_t n, uint32_t m, uint32_t w, seal::Modulus modulus)
             {
                 mN = n;
                 mM = m;

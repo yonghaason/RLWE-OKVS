@@ -12,7 +12,6 @@ using namespace seal;
 using namespace seal::util;
 using namespace oc;
 
-
 static inline uint64_t invert_uint_mod_prime_u64(uint64_t value, uint64_t modulus)
 {
     __int128 t = 0;
@@ -44,15 +43,15 @@ static inline uint64_t invert_uint_mod_prime_u64(uint64_t value, uint64_t modulu
 namespace rlweOkvs
 {
     void mat_vec_mult_band_flat(
-        const std::vector<uint64_t> &bands_flat, 
-        const std::vector<uint32_t> &start_pos, 
-        const std::vector<uint64_t> &x, 
+        const std::vector<uint64_t> &bands_flat,
+        const std::vector<uint32_t> &start_pos,
+        const std::vector<uint64_t> &x,
         const seal::Modulus &modulus,
         std::vector<uint64_t> &result)
     {
         auto n = start_pos.size();
         auto w = bands_flat.size() / n;
-        
+
         for (uint32_t i = 0; i < n; ++i)
         {
             const uint64_t *__restrict row = bands_flat.data() + static_cast<size_t>(i) * w;
@@ -87,7 +86,7 @@ namespace rlweOkvs
         const uint64_t *__restrict row = bands_flat.data() + static_cast<size_t>(i) * w;
         uint64_t acc = 0;
         auto position = start_pos[i];
-            
+
         for (uint32_t j = 0; j < w; ++j) {
             if (position >= m) position = position - m + 1;
             acc = multiply_add_uint_mod(row[j], x[position], acc, modulus);
@@ -103,17 +102,16 @@ namespace rlweOkvs
         std::vector<uint64_t> &bands_flat,
         std::vector<uint32_t> &start_pos,
         oc::block seed)
-    {        
+    {
         u64 seed_u64 = seed.mData[0];
-        // Generate random-band matrix
-        
-#pragma GCC unroll 16 
+
+#pragma GCC unroll 16
         for (uint32_t i = 0; i < mN; ++i) {
             const void* p = key[i].data();
-            start_pos[i] = XXH32(p, sizeof(oc::block), seed_u64) % (mM - mW + 1);            
+            start_pos[i] = XXH32(p, sizeof(oc::block), seed_u64) % (mM - mW + 1);
             for (uint32_t j = 0; j < mW; j++) {
                 bands_flat[i*mW + j] = barrett_reduce_64(
-                    XXH64(p, sizeof(oc::block), seed_u64+j), 
+                    XXH64(p, sizeof(oc::block), seed_u64+j),
                     mModulus);
             }
         }
@@ -125,7 +123,7 @@ bool PrimeFieldOkvs::sgauss_elimination(
     const std::vector<uint32_t>& start_pos,
     std::vector<uint64_t>& solution)
 {
-    // sort
+
     std::vector<uint32_t> perm(mN);
     std::iota(perm.begin(), perm.end(), 0);
     std::sort(perm.begin(), perm.end(),
@@ -133,7 +131,6 @@ bool PrimeFieldOkvs::sgauss_elimination(
                   return start_pos[a] < start_pos[b];
               });
 
-    // setup
     std::vector<uint64_t*> row_ptr(mN);
     std::vector<uint64_t> v_perm(mN);
     std::vector<uint32_t> s_perm(mN);
@@ -205,7 +202,7 @@ bool PrimeFieldOkvs::sgauss_elimination(
     solution.assign(mM, 0);
 
     for (int i = static_cast<int>(mN) - 1; i >= 0; --i) {
-        
+
         const uint64_t* __restrict row_i = row_ptr[i];
         const uint32_t base = s_perm[i];
         const uint32_t off = offsets[i];
@@ -217,7 +214,6 @@ bool PrimeFieldOkvs::sgauss_elimination(
         const uint64_t* __restrict b = solution.data() + base + off + 1;
         const uint64_t* __restrict e = row_i + mW;
 
-        // CAUTION: This accumulating could be problematic when mW is large
         for (; a < e; ++a, ++b) {
             acc128 += static_cast<__uint128_t>(*a) * (*b);
         }

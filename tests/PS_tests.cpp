@@ -19,10 +19,6 @@ using namespace std;
 using namespace oc;
 using namespace rlweOkvs;
 
-// F_PS: the sender holds pi, the receiver holds x; they end with a, b such
-// that a ^ b = pi(x). Checked against the permutation applied in the clear.
-// The switch OTs are generated in a separate phase first, which is where they
-// belong -- they are random and depend only on n.
 void permute_share_test(const oc::CLP& cmd)
 {
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 12));
@@ -30,7 +26,6 @@ void permute_share_test(const oc::CLP& cmd)
 
     PRNG prng(block(3128, 8712));
 
-    // A random permutation for the sender, and a random input for the receiver.
     std::vector<int> perm(n);
     std::iota(perm.begin(), perm.end(), 0);
     for (u64 i = n - 1; i > 0; --i) std::swap(perm[i], perm[prng.get<u64>() % (i + 1)]);
@@ -76,10 +71,6 @@ void permute_share_test(const oc::CLP& cmd)
 
     sender.setPermutation(perm);
 
-    // Waksman check: the routing seeds its DFS at wire 0 with route 0, so the
-    // first switch of every even-sized sub-network is forced to 0 -- these are
-    // exactly the switches a Waksman network drops. Verified here for the top
-    // level, over several permutations.
     for (u64 t = 0; t < 8; ++t) {
         std::vector<int> p2(n);
         std::iota(p2.begin(), p2.end(), 0);
@@ -101,7 +92,7 @@ void permute_share_test(const oc::CLP& cmd)
 
     for (u64 i = 0; i < n; ++i) {
         const u8 got = senderShare[i] ^ receiverShare[i];
-        // benes routes input position perm[i] to output i
+
         const u8 want = input[perm[i]];
         if (got != want) {
             cout << "mismatch at " << i << ": got " << (int)got << ", want "
@@ -110,7 +101,6 @@ void permute_share_test(const oc::CLP& cmd)
         }
     }
 
-    // --- the correlated (offline/online) form ---------------------------
     {
         auto socket2 = coproto::LocalAsyncSocket::makePair();
         socket2[0].setExecutor(pool0);
@@ -135,7 +125,6 @@ void permute_share_test(const oc::CLP& cmd)
         runBoth(sender2.apply(sShare, socket2[0]),
                 receiver2.apply(input, rShare, socket2[1]));
 
-        // The permutation is the sender's random one this time.
         const auto& rho = sender2.getPermRef();
         for (u64 i = 0; i < n; ++i) {
             const u8 got = sShare[i] ^ rShare[i];

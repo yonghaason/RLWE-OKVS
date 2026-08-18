@@ -14,15 +14,11 @@ using namespace volePSI;
 namespace rlweOkvs
 {
 namespace {
-// Bit width of the arithmetic shares produced by weightedSum*. Cardinalities
-// and payload sums are reduced mod 2^32.
+
 constexpr u64 kShareBits = 32;
 
-// Number of GMW instances used for the (single) threshold comparison. The
-// circuit is evaluated on one row of real input; the rest are padding so the
-// silent OT backend stays in a comfortable size regime.
 constexpr u64 kThresholdInstances = 128;
-}  // namespace
+}
 
 Proto genRotSender(SilentOtExtSender &ot, PRNG &prng, Socket &chl, u64 count,
                    RotStore &store)
@@ -48,14 +44,9 @@ Proto weightedSumSender(const RotStore &rot, Socket &chl,
     const u64 nSlots = shareBits.size();
     const u64 k = weights.size();
 
-    // The offline OTs have random choice bits; the receiver says which of them
-    // to flip so that the effective choice is its share bit.
     BitVector flip(nSlots * k);
     co_await chl.recv(flip);
 
-    // With the pair oriented to the receiver's choice, sending
-    // delta = r0 - r1 + (1-2v)w lets it reach r0 + u(1-2v)w, whose distance to
-    // the sender's r0 - vw is exactly (u ^ v) * w.
     std::vector<u32> delta(nSlots * k);
     shares.assign(k, 0);
     for (u64 t = 0; t < k; ++t) {
@@ -110,15 +101,11 @@ Proto PsuSender::setup(Socket &chl)
     sspmtSender.setTimer(getTimer());
     co_await sspmtSender.setup(chl);
 
-    // The whole permute + share is precomputed against a random permutation:
-    // switch OTs, routing and both network evaluations. Online it costs one
-    // blinded vector and a local permutation.
     const u64 nSlots = sspmtSender.getLayoutSize();
     psSender.setTimer(getTimer());
     psSender.init(nSlots);
     co_await psSender.correlate(otSwitchReceiver, mPrng, chl);
 
-    // The transfer runs over item indices now, not slots, so n_y OTs suffice.
     co_await genRotSender(otSender, mPrng, chl, mN, mRot);
     setTimePoint("PsuSender::Setup (transfer OTs)");
 
@@ -137,19 +124,6 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
 
     auto comm = chl.bytesSent() + chl.bytesReceived();
 
-    // The permutation was fixed offline and at random, so instead of routing
-    // one that puts our items first, we look up where it sent their slots.
-    //
-    // The receiver has to be told which of its M share positions are the real
-    // ones -- it does not know the permutation. It only needs the *set*: both
-    // sides walk the positions in increasing order, so the k-th marked one is
-    // the k-th OT instance. A bit per position costs M bits, against 4 bytes
-    // per item for an explicit list, and is within a few percent of the
-    // entropy of an n_y-subset of [M].
-    //
-    // Ordering the items by their (random) position is also what randomizes
-    // which OT index carries which item -- the receiver sees which indices
-    // carried a new element, so that order must not be our input order.
     std::vector<int> itemToSlot(mN, -1);
     for (u64 s = 0; s < nSlots; ++s) {
         if (slotToItem[s] != UINT32_MAX) itemToSlot[slotToItem[s]] = (int)s;
@@ -168,8 +142,6 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
     }
     co_await chl.send(realPos);
 
-    // Walk the positions in order; entry k is the item sitting at the k-th
-    // marked position, and its membership bit folds in our own share.
     std::vector<u32> order(mN);
     BitVector bits(mN);
     {
@@ -186,8 +158,6 @@ Proto PsuSender::run(const std::vector<oc::block> &Y, Socket &chl)
     BitVector flip(mN);
     co_await chl.recv(flip);
 
-    // Send only the message the receiver recovers when the shares agree; if
-    // they disagree it xors with the other pad and gets garbage.
     vector<block> otp(mN);
     for (u64 j = 0; j < mN; j++) {
         const bool swap = flip[j];
@@ -230,12 +200,9 @@ Proto PsuReceiver::run(const std::vector<oc::block> &X,
     BitVector sspmt;
     co_await sspmtReceiver.run(X, sspmt, chl);
 
-    // Permute + share, precomputed offline against a permutation only the
-    // sender knows; here it is one blinded vector.
     BitVector psShare;
     co_await psReceiver.apply(sspmt, psShare, chl);
 
-    // The marked positions, in increasing order, are the OT instances.
     BitVector realPos(psShare.size());
     co_await chl.recv(realPos);
 
@@ -273,8 +240,6 @@ Proto PsiCardSender::setup(Socket &chl)
     sspmtSender.setTimer(getTimer());
     co_await sspmtSender.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtSender.getLayoutSize();
     co_await genRotSender(otSender, mPrng, chl, nSlots, mRot);
     setTimePoint("PsiCardSender::Setup (transfer OTs)");
@@ -295,7 +260,6 @@ Proto PsiCardSender::run(const std::vector<oc::block> &Y, Socket &chl)
     std::vector<u32> shares;
     co_await weightedSumSender(mRot, chl, sspmt, weights, shares);
 
-    // Only the receiver learns the cardinality.
     co_await chl.send(shares[0]);
 
     comm = chl.bytesSent() + chl.bytesReceived() - comm;
@@ -313,8 +277,6 @@ Proto PsiCardReceiver::setup(Socket &chl)
     sspmtReceiver.setTimer(getTimer());
     co_await sspmtReceiver.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtReceiver.getLayoutSize();
     co_await genRotReceiver(otReceiver, mPrng, chl, nSlots, mRot);
     setTimePoint("PsiCardReceiver::Setup (transfer OTs)");
@@ -349,8 +311,6 @@ Proto PsiSumSender::setup(Socket &chl)
     sspmtSender.setTimer(getTimer());
     co_await sspmtSender.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtSender.getLayoutSize();
     co_await genRotSender(otSender, mPrng, chl, nSlots, mRot);
     setTimePoint("PsiSumSender::Setup (transfer OTs)");
@@ -375,8 +335,6 @@ Proto PsiSumSender::run(const std::vector<oc::block> &Y,
 
     auto comm = chl.bytesSent() + chl.bytesReceived();
 
-    // The weight at each slot is the payload of the item sitting there
-    // (empty slots contribute nothing).
     std::vector<std::vector<u32>> weights(1);
     weights[0].resize(nSlots);
     for (u64 s = 0; s < nSlots; ++s) {
@@ -403,8 +361,6 @@ Proto PsiSumReceiver::setup(Socket &chl)
     sspmtReceiver.setTimer(getTimer());
     co_await sspmtReceiver.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtReceiver.getLayoutSize();
     co_await genRotReceiver(otReceiver, mPrng, chl, nSlots, mRot);
     setTimePoint("PsiSumReceiver::Setup (transfer OTs)");
@@ -439,8 +395,6 @@ Proto PsiThresholdSender::setup(Socket &chl)
     sspmtSender.setTimer(getTimer());
     co_await sspmtSender.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtSender.getLayoutSize();
     co_await genRotSender(otSender, mPrng, chl, nSlots, mRot);
     setTimePoint("PsiThresholdSender::Setup (transfer OTs)");
@@ -457,7 +411,7 @@ Proto PsiThresholdSender::setup(Socket &chl)
 Proto PsiThresholdSender::run(const std::vector<oc::block> &Y, oc::u32 threshold,
                               Socket &chl)
 {
-    // "at least 0" is vacuously true and would underflow the strict form.
+
     if (threshold == 0) {
         throw RTE_LOC;
     }
@@ -473,12 +427,6 @@ Proto PsiThresholdSender::run(const std::vector<oc::block> &Y, oc::u32 threshold
     std::vector<u32> shares;
     co_await weightedSumSender(mRot, chl, sspmt, weights, shares);
 
-    // The cardinality stays shared: the comparison against the threshold runs
-    // inside GMW over (receiverShare - senderShare), so neither party sees the
-    // count. Bundle 0 takes the receiver's share, bundle 1 the negated
-    // sender's share and bundle 2 the public threshold; each party feeds its
-    // own bundles and zeroes the others. The circuit tests the strict
-    // "> threshold - 1", which is "at least threshold".
     const u32 negShare = (u32)(0u - shares[0]);
     oc::Matrix<u32> negShareIn(kThresholdInstances, 1);
     oc::Matrix<u32> thresholdIn(kThresholdInstances, 1);
@@ -490,7 +438,7 @@ Proto PsiThresholdSender::run(const std::vector<oc::block> &Y, oc::u32 threshold
     mGmw.setZeroInput(0);
     mGmw.setInput(1, negShareIn);
     mGmw.setInput(2, thresholdIn);
-    co_await mGmw.run(chl);  // triples already generated -> online only
+    co_await mGmw.run(chl);
 
     auto out = mGmw.getOutputView(0);
     u8 outShare = out(0, 0) & 1;
@@ -511,8 +459,6 @@ Proto PsiThresholdReceiver::setup(Socket &chl)
     sspmtReceiver.setTimer(getTimer());
     co_await sspmtReceiver.setup(chl);
 
-    // The transfer OTs are random and their count is public, so they belong
-    // here too; the online phase only flips them onto the real choice bits.
     const u64 nSlots = sspmtReceiver.getLayoutSize();
     co_await genRotReceiver(otReceiver, mPrng, chl, nSlots, mRot);
     setTimePoint("PsiThresholdReceiver::Setup (transfer OTs)");
@@ -550,7 +496,7 @@ Proto PsiThresholdReceiver::run(const std::vector<oc::block> &X,
     mGmw.setInput(0, shareIn);
     mGmw.setZeroInput(1);
     mGmw.setZeroInput(2);
-    co_await mGmw.run(chl);  // triples already generated -> online only
+    co_await mGmw.run(chl);
 
     auto out = mGmw.getOutputView(0);
     u8 senderShare;
@@ -559,4 +505,4 @@ Proto PsiThresholdReceiver::run(const std::vector<oc::block> &X,
     aboveThreshold = ((out(0, 0) ^ senderShare) & 1) != 0;
     setTimePoint("Receiver::Threshold");
 };
-}  // namespace rlweOkvs
+}

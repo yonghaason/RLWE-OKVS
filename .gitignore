@@ -48,13 +48,5 @@ thirdparty/install/*
 CLAUDE.md
 
 # LaTeX build artifacts
-docs/*.aux
-docs/*.bbl
-docs/*.blg
-docs/*.log
-docs/*.out
-docs/*.pdf
-docs/*.fdb_latexmk
-docs/*.fls
-docs/*.synctex.gz
+docs/
 log/benchmark/

@@ -61,9 +61,6 @@ uint32_t activeWrapCountForBatch(uint32_t j, uint32_t numBatch, uint32_t width,
   return wraps;
 }
 
-// log P[Bin(n, p) >= k], summed term by term in log space. Exact up to the
-// truncation of terms more than e^-80 below the largest one (a relative error
-// below 2e-35), which is far tighter than the 2^-70-ish levels we test.
 double logBinomUpperTail(uint64_t n, double logP, double logQ, double lgn1,
                          uint64_t k, double mean) {
   if (k == 0) return 0.0;
@@ -122,11 +119,6 @@ uint32_t SspmtSender::sequenceLayers(const std::vector<uint32_t> &itemBin,
     block_items[itemBlock[i]].push_back(i);
   }
 
-  // Blocks are processed left to right, so a layer's min block is fixed at
-  // creation and span admissibility is purely "min_block + spanBlocks > blk".
-  // Layers are created with nondecreasing min block; the admissible ones form
-  // a suffix [firstActive, end), and scanning it in order is exactly
-  // "smallest anchor first" (earliest-expiring first).
   std::vector<std::vector<uint8_t>> used_bins;
   uint32_t firstActive = 0;
 
@@ -162,23 +154,20 @@ uint32_t SspmtSender::sequenceLayers(const std::vector<uint32_t> &itemBin,
 
 namespace {
 
-// caps[g-1] = D(g)+1, the per-bin item count a length-g block interval has to
-// be able to absorb. Empty when the parameters degenerate.
 std::vector<uint64_t> hallCaps(u64 n, uint32_t numSlots, uint64_t positionRange,
                                uint32_t b, uint32_t lambda) {
   std::vector<uint64_t> caps;
   if (n == 0 || b == 0) {
     return caps;
   }
-  // One share of the 2^-lambda budget per (bin, start position, length)
-  // Hall constraint.
+
   const double logEps = -(double)lambda * std::log(2.0) -
                         std::log((double)numSlots) -
                         2.0 * std::log((double)b);
   const double lgn1 = std::lgamma((double)n + 1.0);
 
   caps.resize(b);
-  uint64_t k = 0;  // D(g); nondecreasing in g, so the walk is amortized
+  uint64_t k = 0;
   for (uint32_t g = 1; g <= b; ++g) {
     const double p = (double)g / (double)positionRange;
     const double logP = std::log((double)g) - std::log((double)positionRange);
@@ -193,11 +182,6 @@ std::vector<uint64_t> hallCaps(u64 n, uint32_t numSlots, uint64_t positionRange,
   return caps;
 }
 
-// A layer spans W blocks, so it can serve an item at block beta iff its start
-// lies in [beta-W+1, beta]: the starts that reach a length-g interval number
-// g+W-1, and the starts covering all b blocks number b+W-1. Hence
-// rho >= caps[g-1]/(g+W-1) for every g, and the window count is
-// ceil(rho * (b+W-1)); kept in integers to avoid rounding surprises.
 uint64_t budgetForSpan(const std::vector<uint64_t> &caps, uint32_t b,
                        uint32_t W) {
   uint64_t budget = 0;
@@ -208,7 +192,7 @@ uint64_t budgetForSpan(const std::vector<uint64_t> &caps, uint32_t b,
   return budget;
 }
 
-}  // namespace
+}
 
 u32 sspmtParams::resolveSpanBlocks(u64 n) const {
   if (span_blocks) {
@@ -223,12 +207,8 @@ u32 sspmtParams::resolveSpanBlocks(u64 n) const {
     return 1;
   }
 
-  // The g = b constraint is span-free, so caps.back() is the floor every span
-  // is measured against. Past W = b every window already covers every block,
-  // hence the search stops there.
   const double floor = (double)caps.back();
-  // Running-time argmin, restricted to W >= min(lambda, b) so that the
-  // asymptotic analysis covers the deployed schedule.
+
   const uint32_t Wlo = std::min<uint32_t>(layerBudgetLambda, b);
   uint32_t span = Wlo;
   double best = std::numeric_limits<double>::max();
@@ -270,27 +250,12 @@ void SspmtSender::sequencing(const std::vector<uint32_t> &start_pos_spacing) {
                                   mSpanBlocks, mItemToLayerIdx, mLayerMinBlock,
                                   mLayerMaxBlock);
 
-  // The realized layer count is a function of Y (its collision structure), so
-  // it is padded up to the public budget before anything leaves this party.
-  //
-  // The budget bounds the *minimum* layer count, and sequenceLayers provably
-  // attains that minimum on every input (docs/sequencing-note.tex,
-  // thm:greedy), so exceeding the budget is exactly the L* > budget event
-  // that resolveLayerBudget caps at 2^-lambda: abort.
   if (mNumRealLayers > mLayerBudget) {
     std::cout << "sequencing: " << mNumRealLayers << " layers exceed the "
               << mLayerBudget << " layer budget" << std::endl;
     throw RTE_LOC;
   }
 
-  // The layout. Padding layers hold no item; their anchor is bookkeeping only.
-  // They are left where the sequencer put them, in a suffix: the sequencer
-  // front-loads each bin, so early layers are denser, but that is a prior the
-  // receiver can compute from the public parameters alone -- its view is
-  // uniform shares, with nothing in it that correlates with occupancy, so
-  // there is nothing for the prior to be applied to. (Where slot coordinates
-  // do become visible, as in the PSU transfer, permuting the layers would not
-  // be enough either; that needs the permute+share step noted in pso.h.)
   mSlotToItem.assign(static_cast<size_t>(mNumLayers) * mNumSlots, UINT32_MAX);
   for (uint32_t i = 0; i < mN; ++i) {
     mSlotToItem[static_cast<size_t>(mItemToLayerIdx[i]) * mNumSlots +
@@ -324,9 +289,6 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mFloodBits = ssParams.floodBits;
   mPrng.SetSeed(seed);
 
-  // The layout is fixed by the public parameters, not by the sequencing --
-  // the sender pads up to it. Setting the layer count here rather than in
-  // sequencing() is what lets setup() size the GMW before any input is known.
   mLayerBudget = ssParams.resolveLayerBudget(mN);
   mNumLayers = mLayerBudget;
 
@@ -343,15 +305,11 @@ void SspmtSender::init(uint32_t n, uint32_t nReceiver, sspmtParams ssParams,
   mBatchEncoder = make_unique<BatchEncoder>(*mContext);
   mEvaluator = make_unique<Evaluator>(*mContext);
 
-  // The level the decoded ciphertexts are switched down to before being
-  // returned; the flooded masks have to live there too.
   mReturnParms = mContext->first_context_data()->next_context_data()->parms_id();
 };
 
 void SspmtSender::addFloodingNoise(seal::Ciphertext &ct) {
-  // BGV keeps the message in the low bits: c0 + c1*s = m + t*e, so the noise
-  // has to be added as a multiple of t. Ciphertexts are stored in NTT form,
-  // hence the transform before accumulating.
+
   const auto ctxData = mContext->get_context_data(ct.parms_id());
   const auto &coeffMod = ctxData->parms().coeff_modulus();
   const auto ntt = ctxData->small_ntt_tables();
@@ -368,7 +326,7 @@ void SspmtSender::addFloodingNoise(seal::Ciphertext &ct) {
     const uint64_t tq = seal::util::barrett_reduce_64(t, q);
     const uint64_t bq = seal::util::barrett_reduce_64(bound, q);
     for (size_t j = 0; j < N; ++j) {
-      // e uniform over [-2^floodBits, 2^floodBits)
+
       uint64_t v = seal::util::barrett_reduce_64(raw[j] & mask, q);
       v = seal::util::sub_uint_mod(v, bq, q);
       tmp[j] = seal::util::multiply_uint_mod(v, tq, q);
@@ -380,7 +338,7 @@ void SspmtSender::addFloodingNoise(seal::Ciphertext &ct) {
 }
 
 void SspmtSender::buildFloodedMasks() {
-  // Masks are the sender's own randomness, so the whole thing is offline.
+
   mMasks.resize(static_cast<size_t>(mNumLayers) * mNumSlots);
   mFloodedMasks.resize(mNumLayers);
 
@@ -414,8 +372,6 @@ Proto SspmtSender::setup(Socket &chl) {
 
   setTimePoint("Sender::Setup begin");
 
-  // The receiver's public key: needed to re-randomize what we send back, and
-  // the only thing published at the key level.
   string pkstr;
   co_await chl.recvResize(pkstr);
   {
@@ -435,8 +391,7 @@ Proto SspmtSender::setup(Socket &chl) {
 
 Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
                        Socket &chl) {
-  // The triples are input independent; if the offline phase was skipped they
-  // are generated here instead, before any input-dependent work starts.
+
   co_await setup(chl);
 
   preprocess(Y);
@@ -453,7 +408,7 @@ Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
     memcpy(&gmwin(i, 0), &mMasks[i], keyByteLength);
   }
   mGmw.setInput(0, gmwin);
-  co_await mGmw.run(chl);  // triples already generated -> online only
+  co_await mGmw.run(chl);
 
   auto rr = mGmw.getOutputView(0);
   results.resize(nInst);
@@ -463,7 +418,7 @@ Proto SspmtSender::run(const std::vector<oc::block> &Y, oc::BitVector &results,
 
 void SspmtSender::preprocess(const std::vector<oc::block> &Y) {
   PrimeFieldOkvs okvs;
-  // okvs.setTimer(getTimer());
+
   okvs.init(Y.size(), mM, mW, mModulus);
   vector<uint64_t> bands_flat(mN * mW);
   vector<uint32_t> start_pos(mN);
@@ -508,8 +463,7 @@ void SspmtSender::preprocess(const std::vector<oc::block> &Y) {
   std::vector<Contrib> flat_contribs;
 
   for (uint32_t i = 0; i < mNumLayers; ++i) {
-    // Padding layers get their (single) random multiplier in
-    // encrypted_decode(); nothing to prepare here.
+
     if (mLayerIsPadding[i]) {
       continue;
     }
@@ -618,9 +572,6 @@ void SspmtSender::encrypted_decode(
     Ciphertext tmp;
     Ciphertext &out = decoded_in_he[i - layerBegin];
 
-    // A padding layer carries no item, so the flooded mask alone is already
-    // what a decoded layer looks like: a uniform plaintext under a freshly
-    // re-randomized, flooded ciphertext.
     if (mLayerIsPadding[i]) {
       out = mFloodedMasks[i];
       continue;
@@ -677,8 +628,6 @@ void SspmtSender::encrypted_decode(
       }
     }
 
-    // Switch down first: the flooding lives at the return level, and mod
-    // switching there would divide it away with the rest of the noise.
     mEvaluator->mod_switch_to_next_inplace(out);
     mEvaluator->add_inplace(out, mFloodedMasks[i]);
   }
@@ -721,8 +670,7 @@ Proto SspmtSender::recv_encoded_chunks(
 Proto SspmtSender::send_decoded_chunks(
     const std::vector<std::vector<seal::Ciphertext>> &encoded_in_he,
     Socket &chl) {
-  // The layer count is the public budget, known to both parties from the
-  // parameters, so it is never transmitted: the realized count depends on Y.
+
   size_t sentBytes = 0;
   std::vector<Ciphertext> decoded_chunk;
   stringstream sendstream;
@@ -766,8 +714,6 @@ void SspmtReceiver::init(uint32_t n, uint32_t nSender, sspmtParams ssParams,
   mWrap = divCeil(mW * mNumSlots, mM) + 1;
   mPrng.SetSeed(seed);
 
-  // Same public formula as the sender's, over the sender's set size: both
-  // parties must agree on the layout size without communicating it.
   mLayerBudget = ssParams.resolveLayerBudget(mNsender);
 
   parms.set_coeff_modulus(
@@ -823,9 +769,6 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
 
   co_await send_encoded_chunks(X, chl);
 
-  // The equality runs over the whole L x H rectangle -- no occupancy is
-  // received -- so slot (layer i, bin b) matches iff the Y-item sitting there
-  // (if any) is in X; empty slots decode to 0 and never match.
   vector<Ciphertext> decoded_in_he;
   co_await recv_decoded_chunks(decoded_in_he, chl);
 
@@ -833,9 +776,6 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
   const u64 keyBitLength = 40 + oc::log2ceil(mNsender);
   const u64 keyByteLength = oc::divCeil(keyBitLength, 8);
 
-  // How much room is left for the noise flooding that re-randomization will
-  // need: the returned ciphertexts must still decrypt after e_flood is added,
-  // so the smallest budget here is the ceiling on log2(e_flood / e_compute).
   {
     int minBudget = INT32_MAX, maxBudget = 0;
     for (size_t i = 0; i < mLayerBudget; ++i) {
@@ -861,7 +801,7 @@ Proto SspmtReceiver::run(const std::vector<oc::block> &X,
   setTimePoint("Receiver::Decrypt");
 
   mGmw.setInput(0, gmwin);
-  co_await mGmw.run(chl);  // triples already generated -> online only
+  co_await mGmw.run(chl);
 
   auto rr = mGmw.getOutputView(0);
   results.resize(nInst);
@@ -876,7 +816,7 @@ Proto SspmtReceiver::send_encoded_chunks(const std::vector<oc::block> &X,
   vector<uint64_t> val(mN, mIndicatorStr);
 
   PrimeFieldOkvs okvs;
-  // okvs.setTimer(getTimer());
+
   okvs.init(X.size(), mM, mW, mModulus);
 
   vector<uint64_t> encoded(mM);
@@ -954,4 +894,4 @@ Proto SspmtReceiver::recv_decoded_chunks(
 
   setTimePoint("Receiver::Recv back and Serialize");
 }
-}  // namespace rlweOkvs
+}
