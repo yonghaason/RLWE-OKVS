@@ -65,7 +65,7 @@ namespace rlweOkvs
                     bandExpansion = 1.7;
                     break;
                 case (1ull << 22):
-                    floodBits = 54;
+                    floodBits = 56;
                     heCoeffModulus = {60, 60, 60, 38};
                     hePlainModulusBits = 60;
                     bandWidth = 46;
