@@ -46,4 +46,7 @@ __pycache__/*
 thirdparty/install/*
 .codex
 CLAUDE.md
+
+# LaTeX build artifacts
+docs/
 log/benchmark/

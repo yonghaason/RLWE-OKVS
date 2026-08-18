@@ -1,3 +1,34 @@
+### This branch: sequencing zero-padding theory
+
+This branch tracks `main` and additionally carries `docs/`, the write-ups
+behind the sequencing layer padding: the sender pads its homomorphically
+decoded layers up to a public budget, so that the transmitted ciphertext
+count — otherwise a function of the sender's set — leaks nothing and can be
+simulated from public parameters alone.
+
+- `docs/sequencing-note.tex` — self-contained paper section:
+  - *Sequencing as covering.* A layer is a window of ζ consecutive blocks
+    with one slot per bin; Hall's condition collapses to block intervals, so
+    minimizing the layer count L\* is an interval-covering program with a
+    min–max theorem (`thm:minmax`).
+  - *The first-fit sequencer is exact* (`thm:greedy`): the left-to-right
+    smallest-anchor pass attains L\* on every input — each failure yields an
+    interval certificate (blocking lemma) and the certificates account for
+    every opened layer. Machine-verified across 5·10⁵ instances; the former
+    exact-sequencer fallback is dead code by this theorem and was removed.
+  - *The public layer budget* (`thm:budget`): with probability 1−2^−λ over
+    the hashing, L\* ≤ L̄ = max_g ⌈(D(g)+1)(b+ζ−1)/(g+ζ−1)⌉, where D(g) is an
+    exact binomial quantile at level 2^−λ/(Nb²). Both parties derive L̄ from
+    public parameters without interaction; the sender always transmits
+    exactly L̄ layers and aborts otherwise (probability ≤ 2^−λ).
+- `docs/lemma-layer-budget.tex` — the same result packaged for the paper: a
+  main-body lemma bounding the sequencer's output directly
+  (Pr[L > L′] ≤ 2^−λ) plus the appendix proof, with first-fit optimality as
+  a remark.
+
+The implementation lives on `main` (`resolveLayerBudget`,
+`resolveSpanBlocks`, `sequenceLayers` in `rlwe-okvs/rlwe-okvs/sspmt.{h,cpp}`).
+
 ### Build
 
 The library can be cloned and built with networking support as follows.

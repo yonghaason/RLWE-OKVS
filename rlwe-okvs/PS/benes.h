@@ -20,7 +20,6 @@ class Benes
 	std::vector<int> permInner;
 	std::vector<int> invPermInner;
 
-	// One scratch buffer per recursion level; see reserveScratch().
 	std::vector<std::vector<int>> mRouteBottom1, mRouteTop1;
 	std::vector<std::vector<int>> mRouteBottom2, mRouteTop2;
 	std::vector<oc::BitVector> mEvalBottom, mEvalTop;
@@ -40,13 +39,9 @@ public:
 
 	void benesEval(std::vector<int> &vec, int depth = 0, int permIdx = 0);
 
-	// otMsgs is flat, indexed column * (n/2) + switch, one bit per switch:
-	// the same bit is xored into both wires, which is what makes a single-bit
-	// message enough (see PermuteShare).
 	void benesMaskedEval(oc::BitVector &src,
 											std::vector<oc::u8> &otMsgs,
 											int depth = 0, int permIdx = 0);
-
 
 	oc::BitVector getSwitchesAsBitVec();
 
@@ -56,4 +51,4 @@ public:
 	const std::vector<int>& getInvPermRef() const {return mInvPerm;};
 };
 
-}  // namespace rlweOkvs
+}

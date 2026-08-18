@@ -1,3 +1,5 @@
+// RB-OKVS implementation of Bienstock et al. (USENIX Security 2023), adapted
+// from https://github.com/google/private-membership (research/okvs/bandokvs).
 #ifndef BANDOKVS_BAND_H_
 #define BANDOKVS_BAND_H_
 
@@ -126,6 +128,6 @@ struct rightshift {
   }
 };
 
-}  // namespace band_okvs
+}
 
-#endif //BANDOKVS_BAND_H_
+#endif

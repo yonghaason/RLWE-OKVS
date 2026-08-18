@@ -1,7 +1,3 @@
-// Benes permutation network, ported from
-// github.com/yonghaason/volepsi (volePSI/PS/benes.cpp) with the block-typed
-// masked evaluation dropped: the permute-and-share here only ever moves
-// single bits (the ss-PMT membership shares).
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -54,8 +50,6 @@ void Benes::initialize(int N, vector<int> perm)
 		mSwitches[i].resize(mN / 2);
 }
 
-// void Benes::DFS(int idx, int route,
-// 	vector<char>& path, vector<int> &perm, vector<int> &invPerm)
 void Benes::DFS(int idx, int route,
 								vector<char> &path)
 {
@@ -67,10 +61,9 @@ void Benes::DFS(int idx, int route,
 		pr = st.top();
 		st.pop();
 		path[pr.first] = pr.second;
-		if (path[pr.first ^ 1] < 0) // if the next item in the vertical array is unassigned
+		if (path[pr.first ^ 1] < 0)
 			st.push({pr.first ^ 1,
-							 pr.second ^ 1}); /// the next item is always assigned the opposite of this item,
-																/// unless it was part of path/cycle of previous node
+							 pr.second ^ 1});
 
 		idx = permInner[invPermInner[pr.first] ^ 1];
 		if (path[idx] < 0)
@@ -95,9 +88,6 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 
 	int coDepth = mLogN - depth;
 
-	/*
-	 * daca avem doar un nivel in retea
-	 */
 	if (subNetSize == 2)
 	{
 		if (coDepth == 1)
@@ -141,19 +131,12 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 		return;
 	}
 
-	/*
-	 * aflam dimensiunea retelei benes
-	 */
 	int levels = 2 * coDepth - 1;
 
 	vector<int> &bottom2 = mRouteBottom2[depth];
 	vector<int> &top2 = mRouteTop2[depth];
 	bottom2.assign(subNetSize / 2, 0);
 	top2.assign(int(ceil(subNetSize * 0.5)), 0);
-
-	/*
-	 * destinatia este o permutare a intrari
-	 */
 
 	for (i = 0; i < subNetSize; ++i)
 		invPermInner[src[i]] = i;
@@ -164,10 +147,6 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 	for (i = 0; i < subNetSize; ++i)
 		invPermInner[permInner[i]] = i;
 
-	/*
-	 * cautam sa vedem ce switch-uri vor fi activate in partea
-	 * inferioara a retelei
-	 */
 	vector<char> path(subNetSize, -1);
 	if (subNetSize % 2 == 1)
 	{
@@ -188,19 +167,6 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 		}
 	}
 
-	/*
-	 * calculam noile perechi sursa-destinatie
-	 * 1 pentru partea superioara
-	 * 2 pentru partea inferioara
-	 */
-	// partea superioara
-	//
-	// shuffle((i|j) ^ s, coDepth) = ((j ^ s) << (coDepth-1)) | (i/2), and the
-	// invariant subNetSize <= 2^coDepth (which holds at the root and is
-	// preserved, including for odd sizes) makes "< subNetSize/2" exactly
-	// "j == s". So the wire that goes down is src[i + s] and the one that goes
-	// up is src[i + 1 - s] -- no data-dependent branch, and both halves grow
-	// by one per switch.
 	bottom1.resize(subNetSize / 2);
 	top1.resize(subNetSize / 2 + (subNetSize % 2));
 	for (i = 0; i < subNetSize - 1; i += 2)
@@ -215,7 +181,6 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 		top1[subNetSize / 2] = src[subNetSize - 1];
 	}
 
-	// partea inferioara
 	for (i = 0; i < subNetSize - 1; i += 2)
 	{
 		s = mSwitches[depth + levels - 1][permIdx + i / 2] = path[permInner[i]];
@@ -229,9 +194,6 @@ void Benes::genBenesRouteInner(int depth, int permIdx, const vector<int> &src,
 		top2[idx - 1] = dest[subNetSize - 1];
 	}
 
-	/*
-	 * recursivitate prin partea superioara si inferioara
-	 */
 	genBenesRouteInner(depth + 1, permIdx, bottom1, bottom2);
 	genBenesRouteInner(depth + 1, permIdx + subNetSize / 4, top1, top2);
 }
@@ -290,7 +252,6 @@ void Benes::benesEval(vector<int> &src, int depth, int permIdx)
 
 	int levels = 2 * coDepth - 1;
 
-	// partea superioara
 	for (i = 0; i < subNetSize - 1; i += 2)
 	{
 		int s = mSwitches[depth][permIdx + i / 2];
@@ -311,7 +272,6 @@ void Benes::benesEval(vector<int> &src, int depth, int permIdx)
 	benesEval(bottom1, depth + 1, permIdx);
 	benesEval(top1, depth + 1, permIdx + subNetSize / 4);
 
-	// partea inferioara
 	for (i = 0; i < subNetSize - 1; i += 2)
 	{
 		s = mSwitches[depth + levels - 1][permIdx + i / 2];
@@ -334,9 +294,6 @@ void Benes::benesEval(vector<int> &src, int depth, int permIdx)
 	}
 }
 
-// The recursion is depth first, so only one call per level is ever live and a
-// single scratch buffer per level is enough. Sizing them up front removes the
-// four allocations every call was making -- O(n) of them per level.
 void Benes::reserveScratch()
 {
 	mRouteBottom1.resize(mLogN + 2);
@@ -443,7 +400,6 @@ void Benes::benesMaskedEval(oc::BitVector &src,
 
 	levels = 2 * coDepth - 1;
 
-	// partea superioara -- see the routing for why the split is branchless.
 	bottom1.resize(subNetSize / 2);
 	top1.resize(subNetSize / 2 + (subNetSize % 2));
 	for (i = 0; i < subNetSize - 1; i += 2)
@@ -497,4 +453,4 @@ oc::BitVector Benes::getSwitchesAsBitVec()
 	}
 	return stretchedSwitches;
 }
-}  // namespace rlweOkvs
+}

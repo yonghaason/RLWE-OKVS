@@ -1,3 +1,4 @@
+// Adapted from the GMW implementation in https://github.com/ladnir/volepsi.
 #include "SilentTripleGen.h"
 #include "cryptoTools/Network/IOService.h"
 #include "cryptoTools/Network/Session.h"
@@ -13,13 +14,13 @@ namespace volePSI
 {
 	void SilentTripleGen::init(u64 n, u64 batchSize, u64 numThreads, Mode mode, block seed)
 	{
-		mBatchSize = batchSize; 
+		mBatchSize = batchSize;
 
 		u64 numBatchs = oc::divCeil(n, mBatchSize);
-		// mNumPer = oc::roundUpTo(oc::divCeil(n, numBatchs), 128);
-		mNumPer = mBatchSize; 
-		
-		mN = numBatchs * mNumPer; 
+
+		mNumPer = mBatchSize;
+
+		mN = numBatchs * mNumPer;
 		mMode = mode;
 		mPrng.SetSeed(seed);
 
@@ -46,13 +47,13 @@ namespace volePSI
 
 	Proto SilentTripleGen::generateBaseCors(oc::PRNG& prng, coproto::Socket& chl) {
 		if (mMode == Mode::Receiver) {
-			u64 length = 0;			
+			u64 length = 0;
 			for (u64 i = 0; i < mRecverOT.size(); i++) {
-				// Determine how many base OTs and base VOLEs we need
+
 				auto count = mRecverOT[i].baseCount();
-				length += count.mBaseOtCount + count.mBaseVoleCount;				
+				length += count.mBaseOtCount + count.mBaseVoleCount;
 			}
-			
+
 			BitVector globChoice(length);
 			globChoice.randomize(prng);
 			AlignedUnVector<block> globMsg(length);
@@ -74,7 +75,7 @@ namespace volePSI
 				auto otCount = count.mBaseOtCount;
 				auto voleCount = count.mBaseVoleCount;
 				auto totalCount = otCount + voleCount;
-				
+
 				BitVector choice(globChoice.data(), otCount, i*totalCount);
 				BitVector baseC(globChoice.data(), voleCount, i*totalCount + otCount);
 				std::span<block> msg{ &*msgIter, otCount};
@@ -88,11 +89,11 @@ namespace volePSI
 		}
 		else {
 			block delta = prng.get();
-			u64 length = 0;			
+			u64 length = 0;
 			for (u64 i = 0; i < mSenderOT.size(); i++) {
-				// Determine how many base OTs and base VOLEs we need
+
 				auto count = mSenderOT[i].baseCount();
-				length += count.mBaseOtCount + count.mBaseVoleCount;				
+				length += count.mBaseOtCount + count.mBaseVoleCount;
 			}
 
 			auto globMsg = AlignedUnVector<std::array<block, 2>>(length);
@@ -107,18 +108,15 @@ namespace volePSI
 			co_await base.receive(choice, baseMsg, prng, chl);
 			mOtExtSender.setBaseOts(baseMsg, choice);
 
-			// if (mOtExtSender.mBase.mSubVole.mVole.mDelta != choice && count.mBaseVoleCount)
-			// 	throw std::runtime_error("genBaseCors does not implement the logic to generate the BaseCors for a different delta value. Caller must do this manually. " LOCATION);
-
 			co_await mOtExtSender.send(globMsg, prng, chl);
 
 			auto msgIter = globMsg.begin();
 			for (u64 i = 0; i < mSenderOT.size(); i++) {
-				
+
 				auto count = mSenderOT[i].baseCount();
 				auto otCount = count.mBaseOtCount;
 				auto voleCount = count.mBaseVoleCount;
-				
+
 				std::span<std::array<block, 2>> msg{ &*msgIter, otCount};
 				msgIter += otCount;
 				std::vector<block> baseB(voleCount);
@@ -129,34 +127,15 @@ namespace volePSI
 				auto hasher = mOtExtSender.mBase.mAesMgr.useAES(msg.size());
 				for (auto& m : msg)
 					hasher.hashBlocks(m, m);
-				
+
 				mSenderOT[i].setBaseCors(msg, baseB, delta);
 			}
 		}
 		mHasBase = true;
 	}
 
-	// void SilentTripleGen::setBaseOts(span<block> recvOts, span<std::array<block, 2>> sendOts)
-	// {
-
-	// 	for (u64 i = 0; i < mSenderOT.size(); i++)
-	// 	{
-	// 		mSenderOT[i].setSilentBaseOts(sendOts.subspan(0, mSenderOT[i].baseOtCount()));
-	// 		sendOts = sendOts.subspan(mSenderOT[i].baseOtCount());
-	// 	}
-
-	// 	for (u64 i = 0; i < mRecverOT.size(); i++)
-	// 	{
-	// 		mRecverOT[i].setSilentBaseOts(recvOts.subspan(0, mRecverOT[i].baseOtCount()));
-	// 		recvOts = recvOts.subspan(mRecverOT[i].baseOtCount());
-	// 	}
-
-	// 	mHasBase = true;
-	// }
-
 #ifndef ENABLE_SSE
 
-	// https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_shuffle_epi8&ig_expand=1038,900,6922,6328
 	inline block _mm_shuffle_epi8(const block& a, const block& b)
 	{
 		block ret;
@@ -175,7 +154,6 @@ namespace volePSI
 		return ret;
 	}
 
-	// https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_slli_epi16&ig_expand=1038,900,6922,6328,6470
 	inline block _mm_slli_epi16(const block& a, int imm)
 	{
 		block ret;
@@ -187,7 +165,6 @@ namespace volePSI
 		return ret;
 	}
 
-	// https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movemask_epi8&ig_expand=1038,900,6922,6328,6470,4836
 	inline int _mm_movemask_epi8(const block& a)
 	{
 		int ret = 0;
@@ -200,7 +177,6 @@ namespace volePSI
 	}
 
 #endif
-
 
 	Proto SilentTripleGen::expand(coproto::Socket& chl)
 	{
@@ -239,19 +215,6 @@ namespace volePSI
 
 				for (u64 i = 0; i < sendMsg.size(); i += 16)
 				{
-					// _mm_shuffle_epi8(a, b): 
-					//     FOR j := 0 to 15
-					//         i: = j * 8
-					//         IF b[i + 7] == 1
-					//             dst[i + 7:i] : = 0
-					//         ELSE
-					//             index[3:0] : = b[i + 3:i]
-					//             dst[i + 7:i] : = a[index * 8 + 7:index * 8]
-					//         FI
-					//     ENDFOR
-
-					// _mm_sll_epi16 : shifts 16 bit works left
-					// _mm_movemask_epi8: packs together the MSB of each byte.
 
 					block a00 = _mm_shuffle_epi8(sendMsg[i + 0][0], shuffle[0]);
 					block a01 = _mm_shuffle_epi8(sendMsg[i + 1][0], shuffle[1]);
@@ -333,25 +296,6 @@ namespace volePSI
 					*aIter16++ = ap ^ bp;
 					*bIter16++ = ap;
 
-					//for (u64 ii = i; ii < i + 16; ++ii)
-					//{
-					//    auto m0 = _mm_extract_epi8(sendMsg[ii][0], 0) & 1;
-					//    auto m1 = _mm_extract_epi8(sendMsg[ii][1], 0) & 1;
-					//    auto a = m0 ^ m1;
-					//    auto b = m0;
-
-					//    auto actA = (((ap ^ bp) >> (ii & 15)) & 1);
-					//    auto actB = ((ap >> (ii & 15)) & 1);
-					//    assert(a == actA);
-					//    assert(b == actB);
-					//    assert(a == *aIter++);
-					//    assert(b == *bIter++);
-
-					//    //if (ii < 20 || ii > sendMsg.size() - 20)
-					//    //{
-					//    //    std::cout << "a[" << ii << "] " << int(a) << " b[" << ii << "] " << int(b) << std::endl;
-					//    //}
-					//}
 				}
 
 			}
@@ -377,22 +321,8 @@ namespace volePSI
 
 				mCBitVec.append(recvOtChoiceBits);
 
-
 				for (u64 i = 0; i < recvMsg.size(); i += 16)
 				{
-					// _mm_shuffle_epi8(a, b): 
-					//     FOR j := 0 to 15
-					//         i: = j * 8
-					//         IF b[i + 7] == 1
-					//             dst[i + 7:i] : = 0
-					//         ELSE
-					//             index[3:0] : = b[i + 3:i]
-					//             dst[i + 7:i] : = a[index * 8 + 7:index * 8]
-					//         FI
-					//     ENDFOR
-
-					// _mm_sll_epi16 : shifts 16 bit works left
-					// _mm_movemask_epi8: packs together the MSG
 
 					block a00 = _mm_shuffle_epi8(recvMsg[i + 0], shuffle[0]);
 					block a01 = _mm_shuffle_epi8(recvMsg[i + 1], shuffle[1]);

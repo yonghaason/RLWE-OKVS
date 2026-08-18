@@ -21,14 +21,6 @@ using namespace rlweOkvs;
 
 #include <stdexcept>
 
-// Exact lower bound on the achievable layer count, via the LP dual of the
-// sequencing problem: the maximum over families of block intervals J_1..J_K
-// whose spanBlocks-extensions are pairwise disjoint of sum_k (max per-bin item
-// count inside J_k). Every valid layer partition needs at least this many
-// layers -- each layer's anchor block lies in at most one extension -- so
-// equality with SspmtSender::sequenceLayers() certifies that both are optimal
-// for the given instance. Test-only: the protocol never needs the bound, only
-// the algorithm it certifies.
 static uint64_t sequencingLowerBound(const std::vector<uint32_t> &itemBin,
                               const std::vector<uint32_t> &itemBlock,
                               uint32_t numSlots, uint32_t spanBlocks) {
@@ -49,12 +41,6 @@ static uint64_t sequencingLowerBound(const std::vector<uint32_t> &itemBin,
     block_items[itemBlock[i]].push_back(i);
   }
 
-  // g[y] = best dual family value using intervals J = [x', y'] with y' <= y,
-  // where a family is admissible if the (clipped) extensions
-  // [max(0, x' - W + 1), y'] are pairwise disjoint. Taking J = [x, y] as the
-  // last interval forces the previous ones to end at or before x - W.
-  // Mrun[x] maintains M([x, y]) = max_bin |{items with bin, block in [x, y]}|
-  // as y sweeps; cnt[x][bin] are the per-interval bin counters.
   std::vector<std::vector<uint32_t>> cnt(b,
                                          std::vector<uint32_t>(numSlots, 0));
   std::vector<uint32_t> Mrun(b, 0);
@@ -83,17 +69,10 @@ static uint64_t sequencingLowerBound(const std::vector<uint32_t> &itemBin,
   return g[b - 1];
 }
 
-// Certifies that the greedy sequencing attains the exact optimum of the
-// underlying interval-covering LP. sequenceLayers() outputs a feasible
-// partition and sequencingLowerBound() computes the LP-dual value, which
-// lower-bounds EVERY feasible partition (weak duality); equality therefore
-// proves both optimal on the instance. Part 1 sweeps randomized small
-// instances, part 2 runs the production parameter sets.
 void opti_sequencing_test(const oc::CLP& cmd)
 {
     PRNG prng(oc::toBlock(cmd.getOr("seed", 1)));
 
-    // --- Part 1: randomized small instances ---
     u64 trials = cmd.getOr("trials", 2000);
     for (u64 t = 0; t < trials; ++t) {
         uint32_t N = 1 + prng.get<uint32_t>() % 6;
@@ -112,7 +91,6 @@ void opti_sequencing_test(const oc::CLP& cmd)
                                                  layerMin, layerMax);
         uint64_t LB = sequencingLowerBound(bins, blks, N, W);
 
-        // Feasibility of the produced partition (span + one item per bin).
         auto checkFeasible = [&](uint64_t layers,
                                  const std::vector<uint32_t>& toLayer,
                                  const std::vector<uint32_t>& lmin,
@@ -129,18 +107,6 @@ void opti_sequencing_test(const oc::CLP& cmd)
         };
         checkFeasible(L, itemToLayer, layerMin, layerMax);
 
-        // The optimal sequencer has to be feasible too, and to hit the bound.
-        std::vector<uint32_t> optToLayer, optMin, optMax;
-        uint64_t Lopt = SspmtSender::sequenceLayersOptimal(
-            bins, blks, N, b, W, optToLayer, optMin, optMax);
-        checkFeasible(Lopt, optToLayer, optMin, optMax);
-        if (Lopt != LB) {
-            std::cout << "OPT-alg mismatch: N=" << N << " b=" << b << " W=" << W
-                      << " n=" << n << " opt=" << Lopt << " dual=" << LB
-                      << std::endl;
-            throw RTE_LOC;
-        }
-
         if (L != LB) {
             std::cout << "OPT mismatch: N=" << N << " b=" << b << " W=" << W
                       << " n=" << n << " greedy=" << L << " dual=" << LB
@@ -152,7 +118,6 @@ void opti_sequencing_test(const oc::CLP& cmd)
         }
     }
 
-    // --- Part 2: production parameter sets ---
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 16));
     auto repeat = cmd.getOr("repeat", 3);
 
@@ -165,7 +130,7 @@ void opti_sequencing_test(const oc::CLP& cmd)
     uint32_t N = params.heNumSlots;
     uint64_t m = roundUpTo(params.bandExpansion * n, N);
     uint32_t W = params.resolveSpanBlocks(n);
-    // Positions are band starts, so they stop bandWidth-1 short of the end.
+
     uint64_t range = m - params.bandWidth + 1;
     uint32_t budget = params.resolveLayerBudget(n);
 
@@ -184,19 +149,9 @@ void opti_sequencing_test(const oc::CLP& cmd)
         uint64_t L = SspmtSender::sequenceLayers(bins, blks, N, W, itemToLayer,
                                                  layerMin, layerMax);
         timer.setTimePoint("greedy");
-        std::vector<uint32_t> optToLayer, optMin, optMax;
-        uint64_t Lopt = SspmtSender::sequenceLayersOptimal(
-            bins, blks, N, (uint32_t)(m / N), W, optToLayer, optMin, optMax);
-        timer.setTimePoint("optimal");
         uint64_t LB = sequencingLowerBound(bins, blks, N, W);
         timer.setTimePoint("dual");
         if (cmd.isSet("v")) std::cout << timer << std::endl;
-
-        if (Lopt != LB) {
-            std::cout << "OPT-alg mismatch on production-size instance: opt="
-                      << Lopt << " dual=" << LB << std::endl;
-            throw RTE_LOC;
-        }
 
         uint32_t maxload = 0;
         {
@@ -204,9 +159,8 @@ void opti_sequencing_test(const oc::CLP& cmd)
             for (u64 i = 0; i < n; ++i) maxload = std::max(maxload, ++cnt[bins[i]]);
         }
 
-        std::cout << "  run " << r << ": greedy L=" << L << ", optimal L="
-                  << Lopt << ", dual LB=" << LB << ", max bin load=" << maxload
-                  << std::endl;
+        std::cout << "  run " << r << ": greedy L=" << L << ", dual LB=" << LB
+                  << ", max bin load=" << maxload << std::endl;
 
         if (L != LB) {
             std::cout << "OPT mismatch on production-size instance" << std::endl;
@@ -221,8 +175,6 @@ void opti_sequencing_test(const oc::CLP& cmd)
         sumMax += (double)maxload;
     }
 
-    // What the padding costs: the transmitted layer count is the public
-    // budget, the realized one is what the optimum needs.
     const double avgL = sumL / repeat;
     std::cout << "n=" << n << " b=" << (m / N) << " W=" << W << " (w="
               << params.bandWidth << ", m/n=" << params.bandExpansion << ")"

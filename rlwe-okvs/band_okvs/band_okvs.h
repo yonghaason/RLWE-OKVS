@@ -1,3 +1,5 @@
+// RB-OKVS implementation of Bienstock et al. (USENIX Security 2023), adapted
+// from https://github.com/google/private-membership (research/okvs/bandokvs).
 #ifndef BANDOKVS_BAND_OKVS_H_
 #define BANDOKVS_BAND_OKVS_H_
 
@@ -167,7 +169,6 @@ class BandOkvs {
     prng_seed_ = prng_seed;
   }
 
-  // Add additional space
   int Size() const {
     return num_vars_ + 64;
   }
@@ -245,7 +246,6 @@ class BandOkvs {
     return true;
   }
 
-  // oc::block type
   template<typename T, typename V>
   inline typename std::enable_if<std::is_same<V, oc::block>::value, bool>::type
   ReduceToRowEchelon(const BandAndValue<T, V>* bands,
@@ -255,7 +255,6 @@ class BandOkvs {
         (bands, reduced_matrix, reduced_values);
   }
 
-  // all other types
   template<typename T, typename V>
   inline typename std::enable_if<not std::is_same<V, oc::block>::value,
                                  bool>::type
@@ -288,12 +287,12 @@ class BandOkvs {
         (BandAndValue<T, V>*) malloc(n * sizeof(BandAndValue<T, V>));
     GenBandsAndValues<T, V>(n, keys, values, num_vars_,
                             band_length_, bands);
-    //std::sort(bands, bands + n, lessthan());
+
     boost::sort::spreadsort::integer_sort(bands, bands + n,
                                           rightshift(), lessthan());
 
     bool encoded = EncodeHelper<T, V>(bands, out);
-    //free(bands);
+
     return encoded;
   }
 
@@ -321,7 +320,7 @@ class BandOkvs {
                                           rightshift(), lessthan());
 
     DecodeHelper(bands, okvs, out);
-    //free(bands);
+
   }
 
   inline static constexpr __mmask8
@@ -344,8 +343,6 @@ class BandOkvs {
         255
   };
 
-  // Xors values in range [i, i + length) according to the mask defined by
-  // raw_band. Assumes V is 128 bit type.
   template<typename T, typename V>
   inline __m512i DoXor(int i, const T& raw_band, const V* reduced_values,
                        int length) {
@@ -369,7 +366,6 @@ class BandOkvs {
     return res;
   }
 
-  // Xors the 4 128 bit blocks in the 512 bit register.
   static inline __m128i DoXor512(__m512i n) {
     __m128i a = _mm512_extracti64x2_epi64(n, 0);
     __m128i b = _mm512_extracti64x2_epi64(n, 1);
@@ -402,4 +398,4 @@ class BandOkvs {
 
 }
 
-#endif //BANDOKVS_BAND_OKVS_H_
+#endif

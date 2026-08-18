@@ -4,7 +4,6 @@
 #include "seal/util/numth.h"
 #include "seal/util/uintarithsmallmod.h"
 
-
 #include <mutex>
 #include <random>
 
@@ -20,9 +19,9 @@ void encode_test(const oc::CLP& cmd)
     u32 w = cmd.getOr("w", 134);
     u32 m = ceil(cmd.getOr("ratio", 1.16)*n);
     u64 logp = cmd.getOr("logp", 60);
-    // Modulus p(2);
+
     Modulus p(PlainModulus::Batching(8192, logp));
-    
+
     if (logp != 1)
         p = Modulus(PlainModulus::Batching(8192, logp));
 
@@ -30,13 +29,13 @@ void encode_test(const oc::CLP& cmd)
     timer.setTimePoint("start");
 
     PRNG prng(oc::ZeroBlock);
-    vector<block> key(n); 
+    vector<block> key(n);
     vector<uint64_t> value(n);
 
     prng.get<block>(key);
     prng.get<uint64_t>(value);
 
-#pragma GCC unroll 16 
+#pragma GCC unroll 16
     for (uint32_t i = 0; i < n; i++) {
         value[i] = barrett_reduce_64(value[i], p);
     }
@@ -54,7 +53,7 @@ void encode_test(const oc::CLP& cmd)
     vector<uint64_t> value_copy(value);
 
     timer.setTimePoint("copy");
-    
+
     okvs.sgauss_elimination(bands_flat_copy, value_copy, start_pos, encoded);
 
     vector<uint64_t> check(n);
@@ -70,7 +69,7 @@ void encode_test(const oc::CLP& cmd)
         cout << endl;
         timer.setTimePoint("correctness check");
         cout << timer << endl;
-    } 
+    }
 }
 
 void decode_test(const oc::CLP& cmd)
@@ -123,13 +122,13 @@ void decode_test(const oc::CLP& cmd)
     if (cmd.isSet("v")) {
         cout << endl;
         cout << timer << endl;
-    } 
+    }
 }
 
 void width_test(const oc::CLP& cmd)
 {
     u32 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
-    double m_ratio = cmd.getOr("ratio", 1.16); 
+    double m_ratio = cmd.getOr("ratio", 1.16);
     u64 logp = cmd.getOr("logp", 60);
     u32 trials_total = cmd.getOr("trials", 100000);
     u32 w0 = cmd.getOr("w0", 0);
@@ -166,7 +165,7 @@ void width_test(const oc::CLP& cmd)
 
         std::mutex io_mtx;
 
-        auto worker = [&](unsigned /*tid*/, uint64_t my_trials) {
+        auto worker = [&](unsigned , uint64_t my_trials) {
             double local_ms = 0.0;
             uint64_t local_fail = 0;
 
@@ -248,6 +247,6 @@ void width_test(const oc::CLP& cmd)
         std::cout << "\n -> failures=" << fails << "/" << trials_total
                   << ", failure_rate=" << std::fixed << std::setprecision(6) << failure_rate
                   << ", log2_failure_rate=" << lg2_failrate
-                  << ", avg_ms=" << avg_ms << '\n';        
+                  << ", avg_ms=" << avg_ms << '\n';
     }
 }

@@ -1,4 +1,3 @@
-//
 #include "GMW_tests.h"
 #include "GMW/Gmw.h"
 #include "GMW/SilentTripleGen.h"
@@ -21,11 +20,6 @@ using coproto::LocalAsyncSocket;
 using namespace volePSI;
 using PRNG = oc::PRNG;
 
-// sumThresholdCircuit: 1((a + b) > t) over the three XOR-shared input
-// bundles. Checked first in the clear, then through the GMW backend with the
-// same input split the PSI-Threshold protocol uses (party 0 holds b and t,
-// party 1 holds a). The two must agree: an invert flag on the output wire
-// evaluates in the clear but is dropped by the GMW backend.
 void Gmw_threshold_test(const oc::CLP& cmd)
 {
     const u64 bits = 32;
@@ -39,13 +33,12 @@ void Gmw_threshold_test(const oc::CLP& cmd)
         return bv;
     };
 
-    // --- plaintext evaluation ---
     for (u64 i = 0; i < 200; ++i)
     {
         u32 card = prng.get<u32>() % 1000;
         u32 t = prng.get<u32>() % 1000;
         u32 share1 = prng.get<u32>();
-        u32 share0 = card - share1;  // share1 + share0 == card (mod 2^32)
+        u32 share0 = card - share1;
 
         std::array<oc::BitVector, 3> in{pack(share1), pack(share0), pack(t)};
         std::array<oc::BitVector, 1> out{oc::BitVector(1)};
@@ -59,9 +52,8 @@ void Gmw_threshold_test(const oc::CLP& cmd)
         }
     }
 
-    // --- GMW evaluation ---
     const u64 nInst = 128;
-    const u32 card = 37, t = 36;  // "card >= 37" as the strict "card > 36"
+    const u32 card = 37, t = 36;
     u32 share1 = prng.get<u32>();
     u32 share0 = card - share1;
 
@@ -115,7 +107,7 @@ void Gmw_iszero_test(const oc::CLP& cmd)
 {
     block seed = oc::toBlock(cmd.getOr<u64>("s", 0));
     oc::PRNG prng(seed);
-    
+
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 10));
     u64 bs = cmd.getOr("b", 1ull << cmd.getOr("bb", 10));
     u64 keyBitLength = cmd.getOr("kbl", 64);
@@ -129,19 +121,14 @@ void Gmw_iszero_test(const oc::CLP& cmd)
     auto e1 = pool1.make_work();
     pool1.create_threads(nt);
 
-    // In-memory socket, matching the CPSI/OKVS ss-PMT tests, so the GMW cost
-    // measured here is directly comparable to the GMW phase inside those
-    // protocols. (The AsioSocket TCP-loopback path is ~3x slower for the
-    // silent-OT triple generation and is not a like-for-like comparison.)
     auto socket = coproto::LocalAsyncSocket::makePair();
     socket[0].setExecutor(pool0);
     socket[1].setExecutor(pool1);
-    
 
     Matrix<u8> in0, in1;
     in0.resize(n, keyByteLength, oc::AllocType::Uninitialized);
     in1.resize(n, keyByteLength, oc::AllocType::Uninitialized);
-    
+
     prng.get<u8>(in0);
     prng.get<u8>(in1);
     auto diff = prng.get<u64>() % n;
@@ -157,14 +144,14 @@ void Gmw_iszero_test(const oc::CLP& cmd)
     Gmw gmw0, gmw1;
     gmw0.setTimer(timer1);
     gmw1.setTimer(timer2);
-    auto cir = isZeroCircuit(keyBitLength);    
+    auto cir = isZeroCircuit(keyBitLength);
     gmw0.init(n, cir, 1, bs, 0, oc::ZeroBlock);
     gmw1.init(n, cir, 1, bs, 1, oc::OneBlock);
 
     gmw0.setInput(0, in0);
     gmw1.setInput(0, in1);
 
-    auto p0 = gmw0.run(socket[0]); 
+    auto p0 = gmw0.run(socket[0]);
     auto p1 = gmw1.run(socket[1]);
     auto r = macoro::sync_wait(macoro::when_all_ready(std::move(p0), std::move(p1)));
     std::get<0>(r).result();
@@ -205,9 +192,9 @@ void Gmw_iszero_test(const oc::CLP& cmd)
         std::cout << timer2 << std::endl;
         double recvByte = socket[0].bytesReceived();
         double sentByte = socket[0].bytesSent();
-        std::cout 
-        << recvByte/1024.0/1024.0 << " + "  << sentByte/1024.0/1024.0 
-        << " = " << (recvByte + sentByte)/1024.0/1024.0 << " MB " 
+        std::cout
+        << recvByte/1024.0/1024.0 << " + "  << sentByte/1024.0/1024.0
+        << " = " << (recvByte + sentByte)/1024.0/1024.0 << " MB "
         << std::endl;
     }
 }

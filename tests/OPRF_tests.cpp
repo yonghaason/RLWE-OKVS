@@ -19,10 +19,10 @@ using namespace seal;
 using namespace rlweOkvs;
 
 void oprf_protocol_test(const oc::CLP& cmd)
-{       
+{
     u64 n = cmd.getOr("n", 1ull << cmd.getOr("nn", 20));
     u64 nt = cmd.getOr("nt", 1);
-    
+
     PRNG prng;
     prng.SetSeed(oc::ZeroBlock);
     vector<block> X(n);
@@ -37,14 +37,13 @@ void oprf_protocol_test(const oc::CLP& cmd)
     auto e1 = pool1.make_work();
     pool1.create_threads(nt);
 
-    // auto socket = coproto::AsioSocket::makePair();
     auto socket = coproto::LocalAsyncSocket::makePair();
     socket[0].setExecutor(pool0);
     socket[1].setExecutor(pool1);
-    
+
     oc::Timer timer_s;
     oc::Timer timer_r;
-        
+
     OprfSender oprfSender;
     OprfReceiver oprfReceiver;
     oprfSender.setTimer(timer_s);
@@ -55,7 +54,7 @@ void oprf_protocol_test(const oc::CLP& cmd)
 
     vector<block> FX;
     vector<block> FY;
-    
+
     timer_s.setTimePoint("start");
     timer_r.setTimePoint("start");
 
@@ -69,11 +68,11 @@ void oprf_protocol_test(const oc::CLP& cmd)
         std::get<0>(r).result();
         std::get<1>(r).result();
     }
-   
+
     for (size_t i = 0; i < 10; i++) {
         if (FX[i] == FY[i]) throw RTE_LOC;
     }
-    
+
     for (size_t i = 10; i < n; i++) {
         if (FX[i] != FY[i]) throw RTE_LOC;
     }
@@ -82,5 +81,5 @@ void oprf_protocol_test(const oc::CLP& cmd)
         cout << endl;
         cout << timer_s << endl;
         cout << timer_r << endl;
-    } 
+    }
 }

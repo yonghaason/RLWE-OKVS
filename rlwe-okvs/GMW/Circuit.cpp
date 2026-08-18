@@ -1,3 +1,4 @@
+// Adapted from the GMW implementation in https://github.com/ladnir/volepsi.
 #include "Circuit.h"
 #include <string>
 
@@ -16,8 +17,6 @@ namespace volePSI
 
         cd.addInputBundle(a);
 
-        //for (u64 i = 1; i < bits; ++i)
-        //    cd.addGate(a.mWires[i], a.mWires[i], oc::GateType::Nxor, a.mWires[i]);
         auto ts = [](int s) {return std::to_string(s); };
         u64 step = 1;
 
@@ -26,7 +25,7 @@ namespace volePSI
 
         while (step < bits)
         {
-            //std::cout << "\n step " << step << std::endl;
+
             cd.addPrint("\n step " + ts(step) + "\n");
             for (u64 i = 0; i + step < bits; i += step * 2)
             {
@@ -36,9 +35,7 @@ namespace volePSI
                 cd.addPrint(a.mWires[i + step]);
                 cd.addPrint(" -> ");
                 cd.addPrint(a.mWires[i]);
-                //cd.addPrint("a[" + ts(i)+ "] &= a[" +ts(i + step) + "]\n");
 
-                //std::cout << "a[" << i << "] &= a[" << (i + step) << "]" << std::endl;
                 cd.addGate(a.mWires[i], a.mWires[i + step], oc::GateType::And, a.mWires[i]);
             }
 
@@ -66,18 +63,11 @@ namespace volePSI
         BetaBundle sum(bits);
         cd.addTempWireBundle(sum);
 
-        // Depth-optimized adder needs no caller-provided temporaries
-        // (parallel prefix); lessThan allocates its own.
         BetaBundle noTemps(0);
         oc::BetaLibrary::add_build(cd, a, b, sum, noTemps,
                                    oc::BetaLibrary::IntType::Unsigned,
                                    oc::BetaLibrary::Optimized::Depth);
-        // Strict less-than with the operands swapped, rather than
-        // BetaLibrary's greaterThanEq_build: that one flips the result by
-        // setting the output wire's invert flag, and a flag on a terminal wire
-        // has no downstream gate to be folded into. The GMW backend evaluates
-        // gates only, so it would silently return the un-negated bit (whereas
-        // Circuit::evaluate honors the flag -- the two disagree).
+
         oc::BetaLibrary::lessThan_build(cd, t, sum, out,
                                         oc::BetaLibrary::IntType::Unsigned,
                                         oc::BetaLibrary::Optimized::Depth);
@@ -112,7 +102,6 @@ namespace volePSI
             if (out[0] != 0)
                 throw RTE_LOC;
         }
-
 
     }
 }

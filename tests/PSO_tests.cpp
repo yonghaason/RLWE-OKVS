@@ -28,9 +28,6 @@ using namespace rlweOkvs;
 
 namespace {
 
-// Shared setup for the PSO tests: two random sets of size n whose intersection
-// has a known size, the ss-PMT parameters for that size, and a pair of thread
-// pools plus a socket.
 struct PsoFixture
 {
     u64 n, nt, inter;
@@ -42,8 +39,7 @@ struct PsoFixture
     optional<macoro::thread_pool::work> e0, e1;
     array<coproto::AsioSocket, 2> socket;
     Timer timer_s, timer_r;
-    // Bytes on the wire when the offline phase ended, so the report can split
-    // setup from the online protocol.
+
     u64 setupSent = 0, setupRecv = 0;
 
     PsoFixture(const oc::CLP& cmd)
@@ -54,7 +50,6 @@ struct PsoFixture
         nt = cmd.getOr("nt", 1);
         inter = cmd.getOr("inter", n / 2);
 
-        // The HE parameter table only has entries for these sizes.
         u64 paramN = (n == (1ull << 16) || n == (1ull << 18) ||
                       n == (1ull << 20) || n == (1ull << 22))
                          ? n
@@ -65,8 +60,6 @@ struct PsoFixture
         params.span_blocks = cmd.getOr("seq_span", params.span_blocks);
         params.layerBudget = cmd.getOr("L", params.layerBudget);
 
-        // Items live in the low 64 bits: the PSU transfer marks garbage by a
-        // nonzero high word.
         X.resize(n);
         Y.resize(n);
         for (u64 i = 0; i < n; ++i) {
@@ -93,8 +86,6 @@ struct PsoFixture
         std::get<1>(r).result();
     }
 
-    // Offline phase: the correlated randomness, which depends only on the
-    // public parameters. Run separately so its cost is attributed on its own.
     template <typename S, typename R>
     void runSetup(S& sender, R& receiver)
     {
@@ -131,16 +122,6 @@ struct PsoFixture
     }
 };
 
-// Single-party counterpart of PsoFixture for the two-process *_net_test
-// variants (run one party per process so the link between them can be
-// shaped, e.g. by benchmark.sh). Both processes regenerate the same X, Y
-// (and any payloads) from the fixed seed, so the receiver can verify the
-// protocol output locally without extra coordination.
-//
-//   terminal 1:  ./run -u <idx> -role sender -ip 10.99.0.1:1212 -nn 20 -v
-//   terminal 2:  ./run -u <idx> -role recver -ip 10.99.0.1:1212 -nn 20 -v
-//
-// The sender doubles as the TCP server and listens on -ip (its own address).
 struct NetPsoFixture
 {
     u64 n, nt, inter;
@@ -209,9 +190,6 @@ struct NetPsoFixture
         setupRecv = sock.bytesReceived();
     }
 
-    // coproto aborts the process if a socket is destroyed with operations
-    // still in flight, and a sender's last protocol action is a send; drain
-    // the socket before it goes out of scope.
     void finish() { runOne(sock.flush()); }
 
     void report(const oc::CLP& cmd)
@@ -239,7 +217,7 @@ struct NetPsoFixture
     }
 };
 
-}  // namespace
+}
 
 void psu_test(const oc::CLP& cmd)
 {
@@ -370,7 +348,7 @@ void psi_threshold_test(const oc::CLP& cmd)
 void psu_net_test(const oc::CLP& cmd)
 {
     NetPsoFixture f(cmd);
-    // Same draw order as psu_test, so inputs match the in-process variant.
+
     block seedS = f.prng.get<block>();
     block seedR = f.prng.get<block>();
 
@@ -441,7 +419,7 @@ void psi_card_net_test(const oc::CLP& cmd)
 void psi_sum_net_test(const oc::CLP& cmd)
 {
     NetPsoFixture f(cmd);
-    // Payloads before the party seeds: same draw order as psi_sum_test.
+
     vector<u32> payloads(f.n);
     for (auto& p : payloads) p = f.prng.get<u32>() % 1000;
     block seedS = f.prng.get<block>();
