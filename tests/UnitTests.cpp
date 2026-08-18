@@ -1,7 +1,6 @@
 #include "UnitTests.h"
 #include "OKVS_tests.h"
 #include "OPRF_tests.h"
-#include "SEAL_tests.h"
 #include "PSO_tests.h"
 #include "GMW_tests.h"
 #include "SEQ_tests.h"

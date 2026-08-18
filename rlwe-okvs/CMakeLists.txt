@@ -1,6 +1,7 @@
 set(SRCS
     "rlwe-okvs/okvs.cpp"
     "rlwe-okvs/sspmt.cpp"
+    "rlwe-okvs/layer_budget.cpp"
     "band_okvs/band_okvs.cc"
     "band_okvs/band.cc"
     "band_okvs/oprf.cpp"
