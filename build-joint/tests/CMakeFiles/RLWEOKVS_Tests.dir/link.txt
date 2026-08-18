@@ -1,2 +1,0 @@
-/usr/bin/ar qc libRLWEOKVS_Tests.a CMakeFiles/RLWEOKVS_Tests.dir/OKVS_tests.cpp.o CMakeFiles/RLWEOKVS_Tests.dir/OPRF_tests.cpp.o CMakeFiles/RLWEOKVS_Tests.dir/SSPMT_tests.cpp.o CMakeFiles/RLWEOKVS_Tests.dir/PSO_tests.cpp.o CMakeFiles/RLWEOKVS_Tests.dir/GMW_tests.cpp.o CMakeFiles/RLWEOKVS_Tests.dir/SEQ_tests.cpp.o CMakeFiles/RLWEOKVS_Tests.dir/PS_tests.cpp.o CMakeFiles/RLWEOKVS_Tests.dir/UnitTests.cpp.o
-/usr/bin/ranlib libRLWEOKVS_Tests.a
