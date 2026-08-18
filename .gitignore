@@ -50,3 +50,4 @@ CLAUDE.md
 # LaTeX build artifacts
 docs/
 log/benchmark/
+/build-joint/
